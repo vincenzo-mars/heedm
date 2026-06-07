@@ -13,6 +13,43 @@ Formato:
 
 ---
 
+## 2026-06-07 — Rimosso label `Silence` dalla diarizzazione
+
+**Obiettivo:** eliminare il concetto di "silenzio" dalla diarizzazione "a 2 vie" — etichetta in pratica mai utile in UI (un blob grigio "Silenzio" tra due interventi non aggiunge informazione) e fonte di rumore nel timeline (soglia `SILENCE_RMS` arbitraria che spezzava intervalli altrimenti contigui).
+
+**Fatto:**
+- `recorder/diarization.rs`: rimossa variante `SpeakerLabel::Silence`, costante `SILENCE_RMS` e il ramo dedicato in `from_energies` — finestre a bassa energia ora ricadono nel confronto `Mic`/`Sys`/`Both` per rapporto di dominanza, niente più etichetta a parte
+- `src/lib/types.ts`: rimossa voce `silence` da `SPEAKER_INFO` (resta `mic`/`sys`/`both`, fallback "Sconosciuto" per chiavi ignote)
+- Doc aggiornati: `docs/architecture.md`, `docs/backend/stt.md`, `docs/backend/recorder.md`, `docs/frontend/ui.md` (rimossi riferimenti a `silence`/"Silenzio", contatori "4 valori" → "3 valori")
+
+**Decisioni:** nessuna migrazione per sidecar `.diarization.json` esistenti con label `"silence"` — `serde` deserializza con `#[serde(rename_all = "lowercase")]`, un valore sconosciuto fallisce silenziosamente il parse del sidecar intero (`load_diarization_sidecar` ritorna `None` via `.ok()`), quindi al più si perde la diarizzazione di vecchie registrazioni, mai un crash.
+
+---
+
+## 2026-06-07 — Diarizzazione reale "a 2 vie" (mic vs. audio sistema), via timeline energetica app-side
+
+**Obiettivo:** `TranscriptSegment.speaker`/`groupSegments`/`speakerColor` esistevano già in codice e doc (`architecture.md`, `ui.md` parlavano di "speaker diarization" come se funzionasse), ma **nulla** produceva mai un valore: `start_local_server` non passa `--diarize`/`--tinydiarize` a `whisper-server`, quindi `speaker` arrivava sempre `None` → UI mostrava un unico blob "Unknown". Wired una diarizzazione reale.
+
+**Fatto:**
+- Verificato (sorgente `examples/server/server.cpp` v1.7.4) che le due opzioni native di whisper.cpp non sono percorribili qui:
+  - `--tinydiarize` richiede un modello tdrz fine-tuned esistente solo in **inglese** — incompatibile con `language: "it"` hardcoded in `transcribe_recording`
+  - `--diarize` (split per canale stereo) inietta `(speaker N)` solo nell'output testuale legacy — il `verbose_json` che usiamo per segmenti/timestamp non guadagna mai un campo `speaker`, a prescindere dal flag. Per averlo via JSON servirebbe patchare `server.cpp`, mantenere la patch ad ogni bump di `WHISPER_TAG`, ricompilare il binario bundled, e riscrivere tutta la pipeline di registrazione per produrre WAV stereo (mic=L, sys=R) invece del mix mono — sproporzionato
+- Nuovo modulo `recorder/diarization.rs`: `estimate_timeline(mic, sys, sample_rate)` confronta l'energia RMS di mic e audio di sistema a finestre da 200ms (soglie `SILENCE_RMS = 0.01`, `DOMINANCE_RATIO = 1.5`), etichetta ciascuna `Mic`/`Sys`/`Both`/`Silence`, accorpa finestre consecutive uguali in intervalli `{start, end, label}`
+- `stop_recording`: chiama `estimate_timeline` sui buffer `mic_samples`/`sys_samples` **grezzi, prima** di `mixer::mix` (che li fonde in mono — a quel punto "chi" è perso), scrive il risultato come sidecar `<nome registrazione>.diarization.json` accanto al WAV. Solo se `sys_capture` era attivo (altrimenti il timeline sarebbe banalmente sempre "mic"); scrittura best-effort, log-and-continue — non deve mai far fallire una registrazione il cui WAV è già su disco
+- `transcribe_recording`: dopo aver ricevuto `TranscriptResult`, cerca il sidecar e per ogni segmento sceglie l'etichetta dell'intervallo con maggiore sovrapposizione temporale `[start, end]`; assenza di sidecar (registrazioni vecchie o solo-mic) → `speaker: None`, nessuna regressione
+- Frontend: sostituita l'euristica `speakerColor` (regex `(\d+)$` su un presunto formato `SPEAKER_NN` mai prodotto) con `SPEAKER_INFO`/`speakerInfo()` — mappa esplicita a 4 voci fisse (`mic`→"Tu", `sys`→"Sistema", `both`→"Sovrapposti", `silence`→"Silenzio") + fallback "Sconosciuto"; `groupSegments` ora raggruppa sulla chiave grezza (`"mic"|"sys"|...|"unknown"`), la label italiana viene risolta solo in rendering
+- Doc aggiornati: `docs/backend/recorder.md` (nuova sezione "Diarizzazione"), `docs/backend/stt.md` (nuova sottosezione "Diarizzazione" + commento `speaker` aggiornato), `docs/backend/commands.md` (side effect sidecar su `stop_recording`/`transcribe_recording`), `docs/frontend/ui.md` (descrizione `TranscriptView`/`speakerInfo` aggiornata), `docs/architecture.md` (diagramma flusso con ramo diarizzazione)
+
+**Decisioni:**
+- **Stima energetica app-side + sidecar invece di patchare whisper.cpp**: Heedm cattura già mic e audio di sistema in buffer **separati** prima del mix (`RecorderInner.mic_samples`/`sys_samples`) — un dato che whisper.cpp non ha mai (lui vede solo il WAV finale, mono o stereo che sia). Sfruttarlo evita: fork/patch/rebuild del binario bundled, manutenzione della patch nel tempo, riscrittura del formato di registrazione, e il vincolo English-only di tinydiarize. Risultato: stima persino più accurata di quella nativa di whisper.cpp (che deve *ricavare* la separazione da un segnale stereo già "sporco", noi la *abbiamo* a monte)
+- **Modello "a 2 vie" (tu = mic vs. sistema), non N-speaker generico**: è il massimo che la pipeline può onestamente distinguere — due sorgenti audio separate, ciascuna potenzialmente multi-persona (es. chiamata di gruppo lato sistema viene etichettata come un unico "Sistema"). Riflesso nei doc, che prima millantavano diarizzazione generica `SPEAKER_NN` mai esistita
+- **Sidecar JSON best-effort, non parte del formato di registrazione**: se fallisce la scrittura non blocca/corrompe nulla — il WAV (l'archivio reale dell'utente) resta invariato e a piena qualità, il sidecar è puro arricchimento opzionale rigenerabile in teoria (anche se oggi non c'è un comando per rigenerarlo da una registrazione esistente — fuori scope, richiederebbe conservare i buffer grezzi)
+
+**Prossimi passi:**
+- Se in futuro servisse diarizzazione multi-persona vera (es. distinguere più partecipanti nello stesso canale), servirebbe un modello ML dedicato (pyannote/ecc.) — rottura del principio "no dipendenze cloud/pesanti" attuale, da valutare con cura
+
+---
+
 ## 2026-06-07 — Fix pipeline trascrizione: endpoint sbagliato + formato WAV incompatibile ("error decoding response body")
 
 **Obiettivo:** Risolvere l'errore "error decoding response body" alla trascrizione di una registrazione reale (visibile solo ora che il bundling ha sbloccato l'avvio del server — vedi entry sotto).

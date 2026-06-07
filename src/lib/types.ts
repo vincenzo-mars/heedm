@@ -46,21 +46,19 @@ export type SttStatus = "checking" | "starting" | "running" | "error";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-export const SPEAKER_COLORS = [
-  "#3b82f6",
-  "#10b981",
-  "#f59e0b",
-  "#ef4444",
-  "#8b5cf6",
-  "#ec4899",
-  "#06b6d4",
-  "#84cc16",
-];
+// Diarizzazione "a 2 vie": il backend confronta l'energia di mic vs. audio di
+// sistema (vedi diarization.rs) — ogni segmento ricade in una di queste 3
+// etichette fisse, mai in un set arbitrario di speaker.
+const SPEAKER_INFO: Record<string, { label: string; color: string }> = {
+  mic: { label: "YOU", color: "#3b82f6" },
+  sys: { label: "THEM", color: "#10b981" },
+  both: { label: "Sovrapposti", color: "#f59e0b" },
+};
 
-export function speakerColor(speaker: string): string {
-  const match = speaker.match(/(\d+)$/);
-  const idx = match ? parseInt(match[1], 10) : 0;
-  return SPEAKER_COLORS[idx % SPEAKER_COLORS.length];
+const UNKNOWN_SPEAKER = { label: "Sconosciuto", color: "#6b7280" };
+
+export function speakerInfo(speaker: string): { label: string; color: string } {
+  return SPEAKER_INFO[speaker] ?? UNKNOWN_SPEAKER;
 }
 
 export function formatDuration(ms: number): string {
@@ -79,7 +77,7 @@ export function formatSeconds(s: number): string {
 export function groupSegments(segments: TranscriptSegment[]) {
   const groups: { speaker: string; text: string; start: number }[] = [];
   for (const seg of segments) {
-    const speaker = seg.speaker ?? "Unknown";
+    const speaker = seg.speaker ?? "unknown";
     const last = groups[groups.length - 1];
     if (last && last.speaker === speaker) {
       last.text += " " + seg.text.trim();

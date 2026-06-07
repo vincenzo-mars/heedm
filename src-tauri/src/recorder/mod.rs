@@ -1,3 +1,4 @@
+pub mod diarization;
 pub mod mic;
 pub mod mixer;
 pub mod system_audio;

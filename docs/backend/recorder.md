@@ -46,8 +46,41 @@ Il `Stream` va tenuto vivo in `RecorderInner::mic_stream` — dropparlo ferma la
 ## Mixer (`mixer.rs`)
 
 ### `mix(mic: &[f32], sys: &[f32]) -> Vec<f32>`
-Somma i due buffer sample-by-sample. Se hanno lunghezze diverse, si ferma al più corto.
+Somma i due buffer sample-by-sample fino al più lungo (il più corto viene
+considerato silenzio/zero-padded oltre la propria lunghezza).
 Clamp a `[-1.0, 1.0]` per prevenire clipping.
+
+---
+
+## Diarizzazione (`diarization.rs`)
+
+### `estimate_timeline(mic: &[f32], sys: &[f32], sample_rate: u32) -> Vec<SpeakerInterval>`
+Stima — *prima* del mix in mono — chi sta parlando confrontando l'energia RMS di mic
+e audio di sistema a finestre fisse (200ms), poi accorpa finestre consecutive con la
+stessa etichetta in intervalli `{ start, end, label }` (formato compatto da
+serializzare).
+
+`SpeakerLabel`: `Mic` | `Sys` | `Both` (energie comparabili — sovrapposizione).
+Soglia: `DOMINANCE_RATIO = 1.5`.
+
+Modello "a 2 vie" (tu = mic vs. audio di sistema) — è il massimo che la pipeline può
+distinguere: mic e sistema sono due sorgenti separate, ma ciascuna può comunque
+contenere più persone (es. una chiamata multi-partecipante lato sistema viene
+etichettata come un unico "sistema").
+
+### Sidecar `<nome registrazione>.diarization.json`
+`stop_recording` (in `commands.rs`) chiama `estimate_timeline` sui buffer grezzi
+**prima** di passarli a `mixer::mix` — una volta fusi in un'unica traccia mono
+l'informazione "chi" è persa — e scrive il risultato come JSON accanto al WAV
+(stesso nome, estensione sostituita con `.diarization.json`).
+
+Scritto solo se la cattura audio di sistema era attiva (`sys_capture.is_some()`):
+senza una seconda sorgente il timeline sarebbe banalmente sempre "mic". È
+best-effort — un fallimento di scrittura del sidecar viene loggato e ignorato,
+non fa fallire la registrazione (il WAV è già su disco a quel punto).
+
+`transcribe_recording` (vedi [`docs/backend/stt.md`](stt.md)) carica questo sidecar
+se presente e lo usa per popolare `TranscriptSegment.speaker`.
 
 ---
 

@@ -84,9 +84,12 @@ pub struct TranscriptSegment {
     pub start: f64,    // secondi
     pub end: f64,
     pub text: String,
-    pub speaker: Option<String>,  // es. "SPEAKER_00"
+    pub speaker: Option<String>,  // "mic" | "sys" | "both" | None
 }
 ```
+`whisper-server` non fornisce diarizzazione via `verbose_json` (vedi nota sotto) —
+questo campo arriva sempre `None` dalla risposta del server e viene popolato *dopo*,
+da Heedm stesso, vedi "Diarizzazione" più sotto.
 
 ## Comandi percorso
 
@@ -121,6 +124,28 @@ POST `http://127.0.0.1:8080/inference` con multipart (whisper.cpp espone solo `/
 - `response_format`: `"verbose_json"`
 
 Risponde con `TranscriptResult` JSON.
+
+### Diarizzazione (popolamento `TranscriptSegment.speaker`)
+
+`whisper-server` supporta `--diarize`/`--tinydiarize`, ma **non li usiamo**:
+- `--tinydiarize` richiede un modello tdrz fine-tuned disponibile solo in **inglese**
+  — incompatibile con `language: "it"` hardcoded
+- `--diarize` (split stereo per canale) inietta etichette `(speaker N)` solo
+  nell'output testuale legacy — **non** nel `verbose_json` che usiamo per
+  segmenti/timestamp (verificato sui sorgenti di `examples/server/server.cpp`).
+  Per ottenerlo via JSON servirebbe patchare e ricompilare il binario bundled, oltre
+  a riscrivere la pipeline di registrazione per produrre WAV stereo (mic=L, sys=R)
+  invece del mix mono attuale — costo di manutenzione/storage sproporzionato.
+
+Heedm stima invece la diarizzazione **lato app**, sfruttando un dato che possiede
+già: mic e audio di sistema vengono catturati in buffer separati prima del mix
+(vedi [`docs/backend/recorder.md`](recorder.md) → `diarization::estimate_timeline`).
+Dopo aver ricevuto `TranscriptResult`, `transcribe_recording`:
+1. Cerca il sidecar `<nome registrazione>.diarization.json` accanto al WAV
+   (assente per registrazioni solo-mic o precedenti a questa funzionalità → `speaker`
+   resta `None`, nessuna regressione)
+2. Per ogni segmento, sceglie l'intervallo del timeline con la **maggiore
+   sovrapposizione temporale** e ne usa l'etichetta come `speaker`
 
 ### Conversione audio in memoria (`prepare_for_whisper`)
 

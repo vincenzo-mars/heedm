@@ -33,7 +33,7 @@ Stati semantici **non** seguono la palette brand — restano i default Tailwind 
 - errore (banner errore, badge "errore", stato STT `error`) → `red-400`/`red-800`/`red-950`
 - avvio server STT → `amber-500`; stato "checking" → `gray-400`
 
-`SPEAKER_COLORS`/`speakerColor()` in `src/lib/types.ts` restano una palette separata (8 colori per distinguere speaker), non fanno parte del design system brand.
+`SPEAKER_INFO`/`speakerInfo()` in `src/lib/types.ts` restano una mappa colori/etichette separata (3 valori fissi: mic/sys/both, vedi `TranscriptView` sotto), non fa parte del design system brand.
 
 ### Animazioni custom (`@keyframes` in `App.css`)
 
@@ -107,11 +107,16 @@ Card per una singola registrazione.
 
 ### `TranscriptView` — `src/lib/TranscriptView.svelte`
 
-Rendering trascrizione con speaker diarization.
+Rendering trascrizione con diarizzazione "a 2 vie" (tu = mic vs. audio di sistema —
+vedi `docs/backend/stt.md` → Diarizzazione per come viene stimata lato backend).
 
-- `groupSegments()` aggrega segmenti consecutivi dello stesso speaker
-- Ogni gruppo: label speaker colorata (colore da `SPEAKER_COLORS[idx % 8]`) + timestamp + bubble testo
-- Colore speaker: estratto da numero finale del nome (`SPEAKER_00` → idx 0)
+- `groupSegments()` aggrega segmenti consecutivi con la stessa etichetta `speaker`
+  grezza (`"mic"|"sys"|"both"|"unknown"` — chiave di raggruppamento, non
+  testo da mostrare)
+- `speakerInfo(speaker)` mappa la chiave grezza a `{ label, color }` per la UI:
+  `mic` → "YOU" (blu), `sys` → "THEM" (verde), `both` → "Sovrapposti" (ambra),
+  sconosciuto → "Sconosciuto" (grigio)
+- Ogni gruppo: label colorata + timestamp + bubble testo
 
 ## Tipi chiave
 
@@ -143,5 +148,5 @@ type SttStatus = "checking" | "starting" | "running" | "error";
 |---|---|
 | `formatDuration(ms)` | `ms → "HH:MM:SS"` |
 | `formatSeconds(s)` | `s → "M:SS"` (per timestamp segmenti) |
-| `speakerColor(speaker)` | Mappa speaker → colore hex da palette 8 colori |
-| `groupSegments(segments)` | Aggrega segmenti consecutivi stesso speaker |
+| `speakerInfo(speaker)` | Mappa chiave grezza speaker → `{ label, color }` (etichetta italiana + colore) |
+| `groupSegments(segments)` | Aggrega segmenti consecutivi con la stessa chiave speaker grezza |

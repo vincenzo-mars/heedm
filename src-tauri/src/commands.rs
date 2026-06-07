@@ -7,7 +7,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 use tokio::io::AsyncWriteExt;
 
-use crate::recorder::{mic, mixer, system_audio, writer, RecorderState};
+use crate::recorder::{diarization, mic, mixer, system_audio, writer, RecorderState};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -374,7 +374,43 @@ pub async fn transcribe_recording(_app: AppHandle, path: String) -> Result<Trans
         .await
         .map_err(|e| e.to_string())?;
 
-    resp.json::<TranscriptResult>().await.map_err(|e| e.to_string())
+    let mut result: TranscriptResult = resp.json().await.map_err(|e| e.to_string())?;
+
+    if let Some(timeline) = load_diarization_sidecar(&path).await {
+        for segment in result.segments.iter_mut() {
+            segment.speaker = dominant_speaker(segment.start, segment.end, &timeline)
+                .map(|label| label.as_str().to_string());
+        }
+    }
+
+    Ok(result)
+}
+
+/// Carica il sidecar `<nome registrazione>.diarization.json` scritto da `stop_recording`,
+/// se presente — registrazioni più vecchie o solo-microfono non ne hanno uno, e in tal
+/// caso `speaker` resta `None` (nessuna regressione rispetto a prima).
+async fn load_diarization_sidecar(wav_path: &str) -> Option<Vec<diarization::SpeakerInterval>> {
+    let sidecar_path = PathBuf::from(wav_path).with_extension("diarization.json");
+    let bytes = tokio::fs::read(&sidecar_path).await.ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
+/// Etichetta dominante: l'intervallo del timeline con la maggiore sovrapposizione
+/// temporale rispetto al segmento trascritto.
+fn dominant_speaker(
+    start: f64,
+    end: f64,
+    timeline: &[diarization::SpeakerInterval],
+) -> Option<diarization::SpeakerLabel> {
+    timeline
+        .iter()
+        .map(|interval| {
+            let overlap = (interval.end.min(end) - interval.start.max(start)).max(0.0);
+            (overlap, interval.label)
+        })
+        .filter(|(overlap, _)| *overlap > 0.0)
+        .max_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, label)| label)
 }
 
 // ── Recording ─────────────────────────────────────────────────────────────────
@@ -399,7 +435,13 @@ pub async fn start_recording(state: State<'_, RecorderState>) -> Result<(), Stri
     sys_buf.lock().unwrap().clear();
 
     let mic_info = mic::start_mic_capture(mic_buf)?;
-    let sys_capture = system_audio::start(sys_buf, mic_info.sample_rate, mic_info.channels).ok();
+    let sys_capture = match system_audio::start(sys_buf, mic_info.sample_rate, mic_info.channels) {
+        Ok(capture) => Some(capture),
+        Err(e) => {
+            eprintln!("Cattura audio di sistema non disponibile: {e}");
+            None
+        }
+    };
 
     inner.sample_rate = mic_info.sample_rate;
     inner.channels = mic_info.channels;
@@ -416,13 +458,14 @@ pub async fn stop_recording(
     state: State<'_, RecorderState>,
     app: AppHandle,
 ) -> Result<String, String> {
-    let (mixed, sample_rate, channels) = {
+    let (mixed, sample_rate, channels, timeline) = {
         let mut inner = state.0.lock().await;
         if !inner.is_recording {
             return Err("Not recording".to_string());
         }
 
         inner.mic_stream = None;
+        let had_sys_audio = inner.sys_capture.is_some();
         if let Some(mut sys) = inner.sys_capture.take() {
             sys.stop()?;
         }
@@ -433,7 +476,12 @@ pub async fn stop_recording(
         let sys = inner.sys_samples.lock().unwrap().clone();
         let sr = inner.sample_rate;
         let ch = inner.channels;
-        (mixer::mix(&mic, &sys), sr, ch)
+
+        // Solo se è stato catturato anche audio di sistema ha senso stimare un
+        // timeline mic-vs-sistema: senza una seconda sorgente sarebbe sempre "mic".
+        let timeline = had_sys_audio.then(|| diarization::estimate_timeline(&mic, &sys, sr));
+
+        (mixer::mix(&mic, &sys), sr, ch, timeline)
     };
 
     let settings = get_stt_settings(app.clone()).await;
@@ -446,6 +494,21 @@ pub async fn stop_recording(
     let path = dir.join(format!("Registrazione {timestamp}.wav"));
 
     writer::write_wav(&mixed, &path, sample_rate, channels)?;
+
+    // Sidecar best-effort: la diarizzazione è un arricchimento, non deve mai far
+    // fallire la registrazione (il file WAV è già scritto a questo punto).
+    if let Some(timeline) = timeline {
+        let sidecar_path = path.with_extension("diarization.json");
+        match serde_json::to_vec(&timeline) {
+            Ok(json) => {
+                if let Err(e) = tokio::fs::write(&sidecar_path, json).await {
+                    eprintln!("Impossibile scrivere sidecar diarizzazione: {e}");
+                }
+            }
+            Err(e) => eprintln!("Impossibile serializzare timeline diarizzazione: {e}"),
+        }
+    }
+
     Ok(path.to_string_lossy().to_string())
 }
 

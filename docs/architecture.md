@@ -14,36 +14,41 @@
     ▼                     ▼
 [mic_samples: Arc<Mutex<Vec<f32>>>]   [sys_samples: Arc<Mutex<Vec<f32>>>]
                 │                              │
-                └──────────┬───────────────────┘
-                           │
-                    [mixer::mix()]
-                    somma sample-by-sample
-                    clamp ±1.0
-                           │
-                           ▼
-                    [writer::write_wav()]
-                    WAV Float32, sample_rate/channels
-                    da dialog save utente
-                           │
-                           ▼
-                    [file .wav su disco]
-                           │
-                           ▼
-              [transcribe_recording() command]
-              multipart POST /v1/audio/transcriptions
-              language: it, response_format: verbose_json
-                           │
-                    [whisper-server locale]
-                    127.0.0.1:8080
-                    modello: ggml-large-v3-turbo
-                           │
-                           ▼
-                    [TranscriptResult]
-                    text, segments[], speaker diarization
-                           │
-                           ▼
-                    [Frontend Svelte]
-                    TranscriptView — gruppi per speaker
+                ├──────────────┬───────────────┤   (buffer grezzi, separati — usati
+                │              │               │    due volte prima di essere fusi)
+                ▼              │               ▼
+       [mixer::mix()]         │      [diarization::estimate_timeline()]
+       somma sample-by-sample │      energia RMS mic vs sistema a finestre
+       clamp ±1.0             │      → intervalli {start, end, label}
+                │             │               │
+                ▼             │               ▼
+       [writer::write_wav()] │      [<nome>.diarization.json]
+       WAV Float32           │      sidecar accanto al WAV
+       sample_rate/channels  │      (solo se audio sistema attivo,
+                │            │       best-effort — non blocca la REC)
+                ▼            │               │
+       [file .wav su disco] ─┘               │
+                │                            │
+                ▼                            │
+   [transcribe_recording() command]          │
+   multipart POST /inference                 │
+   language: it, response_format:            │
+   verbose_json (prepare_for_whisper         │
+   converte in memoria a 16kHz/mono)         │
+                │                            │
+                ▼                            │
+   [whisper-server locale]                   │
+   127.0.0.1:8080                            │
+   modello: ggml-large-v3-turbo              │
+                │                            │
+                ▼                            │
+   [TranscriptResult: text, segments[]] ◄────┘
+   merge per sovrapposizione temporale →
+   segments[].speaker = "mic"|"sys"|"both"|None
+                │
+                ▼
+       [Frontend Svelte]
+       TranscriptView — gruppi per speakerInfo() (Tu/Sistema/Sovrapposti/...)
 ```
 
 ## Componenti principali
