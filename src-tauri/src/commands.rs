@@ -1,3 +1,4 @@
+use std::io::Cursor;
 use std::path::PathBuf;
 
 use futures_util::StreamExt;
@@ -11,12 +12,6 @@ use crate::recorder::{mic, mixer, system_audio, writer, RecorderState};
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const LOCAL_PORT: u16 = 8080;
-
-// Update these URLs to the actual whisper.cpp release assets for your target platform.
-#[cfg(target_arch = "aarch64")]
-const BIN_URL: &str = "https://github.com/ggerganov/whisper.cpp/releases/download/v1.7.4/whisper-blas-blas-server-osx-arm64.zip";
-#[cfg(not(target_arch = "aarch64"))]
-const BIN_URL: &str = "https://github.com/ggerganov/whisper.cpp/releases/download/v1.7.4/whisper-blas-blas-server-osx-x64.zip";
 
 const MODEL_URL: &str =
     "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin";
@@ -60,8 +55,10 @@ fn model_dir(app: &AppHandle, settings: &SttSettings) -> PathBuf {
     }
 }
 
-fn local_bin_path(app: &AppHandle, settings: &SttSettings) -> PathBuf {
-    model_dir(app, settings).join("bin").join("whisper-server")
+fn bundled_bin_path(app: &AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .resolve("whisper-server", tauri::path::BaseDirectory::Resource)
+        .map_err(|e| e.to_string())
 }
 
 fn local_model_path(app: &AppHandle, settings: &SttSettings) -> PathBuf {
@@ -112,7 +109,7 @@ pub async fn save_stt_settings(app: AppHandle, settings: SttSettings) -> Result<
 #[tauri::command]
 pub async fn get_local_model_status(app: AppHandle) -> bool {
     let settings = get_stt_settings(app.clone()).await;
-    local_bin_path(&app, &settings).exists() && local_model_path(&app, &settings).exists()
+    local_model_path(&app, &settings).exists()
 }
 
 #[tauri::command]
@@ -154,73 +151,7 @@ pub async fn download_local_model(app: AppHandle) -> Result<(), String> {
     let client = reqwest::Client::new();
     let settings = get_stt_settings(app.clone()).await;
 
-    // 1. Download binary zip
-    let bin_path = local_bin_path(&app, &settings);
-    tokio::fs::create_dir_all(bin_path.parent().unwrap())
-        .await
-        .map_err(|e| e.to_string())?;
-    let tmp_zip = bin_path.parent().unwrap().join("_whisper.zip");
-
-    {
-        let resp = client
-            .get(BIN_URL)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
-        let total = resp.content_length().unwrap_or(0);
-        let mut file = tokio::fs::File::create(&tmp_zip)
-            .await
-            .map_err(|e| e.to_string())?;
-        let mut downloaded = 0u64;
-        let mut stream = resp.bytes_stream();
-
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk.map_err(|e| e.to_string())?;
-            file.write_all(&chunk).await.map_err(|e| e.to_string())?;
-            downloaded += chunk.len() as u64;
-            if total > 0 {
-                app.emit(
-                    "download-progress",
-                    serde_json::json!({"step":"binary","pct": downloaded * 100 / total}),
-                )
-                .ok();
-            }
-        }
-    }
-
-    // Extract server binary from zip
-    let zip_src = tmp_zip.clone();
-    let bin_dest = bin_path.clone();
-    tokio::task::spawn_blocking(move || -> Result<(), String> {
-        let f = std::fs::File::open(&zip_src).map_err(|e| e.to_string())?;
-        let mut archive = zip::ZipArchive::new(f).map_err(|e| e.to_string())?;
-
-        for i in 0..archive.len() {
-            let mut entry = archive.by_index(i).map_err(|e| e.to_string())?;
-            let name = entry.name().to_string();
-            if name == "server" || name.ends_with("/server") {
-                let mut out =
-                    std::fs::File::create(&bin_dest).map_err(|e| e.to_string())?;
-                std::io::copy(&mut entry, &mut out).map_err(|e| e.to_string())?;
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    let mut perms = std::fs::metadata(&bin_dest)
-                        .map_err(|e| e.to_string())?
-                        .permissions();
-                    perms.set_mode(0o755);
-                    std::fs::set_permissions(&bin_dest, perms).map_err(|e| e.to_string())?;
-                }
-                break;
-            }
-        }
-        std::fs::remove_file(&zip_src).ok();
-        Ok(())
-    })
-    .await
-    .map_err(|e| e.to_string())??;
-
-    // 2. Download model
+    // whisper-server è bundled come risorsa app — qui si scarica solo il modello
     let model_path = local_model_path(&app, &settings);
     tokio::fs::create_dir_all(model_path.parent().unwrap())
         .await
@@ -277,10 +208,10 @@ pub async fn start_local_server(app: AppHandle) -> Result<(), String> {
     }
 
     let settings = get_stt_settings(app.clone()).await;
-    let bin = local_bin_path(&app, &settings);
+    let bin = bundled_bin_path(&app)?;
     let model = local_model_path(&app, &settings);
 
-    if !bin.exists() || !model.exists() {
+    if !model.exists() {
         return Err("Modello locale non scaricato".to_string());
     }
 
@@ -346,31 +277,98 @@ pub struct TranscriptResult {
     pub segments: Vec<TranscriptSegment>,
 }
 
+const WHISPER_SAMPLE_RATE: u32 = 16_000;
+
+/// whisper.cpp's `read_wav` accetta solo mono 16kHz 16-bit PCM (`common.cpp`).
+/// Le registrazioni sono salvate a piena qualità (rate nativo del mic, float32) per
+/// preservare l'archivio utente — la conversione avviene qui, solo in memoria, per
+/// la richiesta di trascrizione.
+fn prepare_for_whisper(wav_bytes: &[u8]) -> Result<Vec<u8>, String> {
+    let mut reader = hound::WavReader::new(Cursor::new(wav_bytes)).map_err(|e| e.to_string())?;
+    let spec = reader.spec();
+    let channels = spec.channels as usize;
+
+    let samples: Vec<f32> = match spec.sample_format {
+        hound::SampleFormat::Float => reader
+            .samples::<f32>()
+            .collect::<Result<_, _>>()
+            .map_err(|e| e.to_string())?,
+        hound::SampleFormat::Int => {
+            let max = (1i64 << (spec.bits_per_sample - 1)) as f32;
+            reader
+                .samples::<i32>()
+                .map(|s| s.map(|v| v as f32 / max))
+                .collect::<Result<_, _>>()
+                .map_err(|e| e.to_string())?
+        }
+    };
+
+    let mono: Vec<f32> = if channels <= 1 {
+        samples
+    } else {
+        samples
+            .chunks(channels)
+            .map(|frame| frame.iter().sum::<f32>() / channels as f32)
+            .collect()
+    };
+
+    let resampled = if spec.sample_rate == WHISPER_SAMPLE_RATE {
+        mono
+    } else {
+        let ratio = spec.sample_rate as f64 / WHISPER_SAMPLE_RATE as f64;
+        let out_len = (mono.len() as f64 / ratio).round() as usize;
+        let mut out = Vec::with_capacity(out_len);
+        for i in 0..out_len {
+            let pos = i as f64 * ratio;
+            let idx = pos.floor() as usize;
+            let frac = (pos - idx as f64) as f32;
+            let a = mono.get(idx).copied().unwrap_or(0.0);
+            let b = mono.get(idx + 1).copied().unwrap_or(a);
+            out.push(a + (b - a) * frac);
+        }
+        out
+    };
+
+    let out_spec = hound::WavSpec {
+        channels: 1,
+        sample_rate: WHISPER_SAMPLE_RATE,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+    let mut buf = Cursor::new(Vec::new());
+    {
+        let mut writer = hound::WavWriter::new(&mut buf, out_spec).map_err(|e| e.to_string())?;
+        for s in resampled {
+            let v = (s.clamp(-1.0, 1.0) * i16::MAX as f32) as i16;
+            writer.write_sample(v).map_err(|e| e.to_string())?;
+        }
+        writer.finalize().map_err(|e| e.to_string())?;
+    }
+    Ok(buf.into_inner())
+}
+
 #[tauri::command]
 pub async fn transcribe_recording(_app: AppHandle, path: String) -> Result<TranscriptResult, String> {
     let base_url = format!("http://127.0.0.1:{LOCAL_PORT}");
 
     let file_bytes = tokio::fs::read(&path).await.map_err(|e| e.to_string())?;
-    let filename = std::path::Path::new(&path)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("audio.wav")
-        .to_string();
+    let converted = tokio::task::spawn_blocking(move || prepare_for_whisper(&file_bytes))
+        .await
+        .map_err(|e| e.to_string())??;
 
-    let part = reqwest::multipart::Part::bytes(file_bytes)
-        .file_name(filename)
+    let part = reqwest::multipart::Part::bytes(converted)
+        .file_name("audio.wav")
         .mime_str("audio/wav")
         .map_err(|e| e.to_string())?;
 
     let form = reqwest::multipart::Form::new()
         .part("file", part)
-        .text("model", "whisper-1")
         .text("language", "it")
         .text("response_format", "verbose_json");
 
     let client = reqwest::Client::new();
     let resp = client
-        .post(format!("{base_url}/v1/audio/transcriptions"))
+        .post(format!("{base_url}/inference"))
         .multipart(form)
         .send()
         .await

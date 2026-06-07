@@ -105,13 +105,11 @@ async function startDownload() {
 }
 
 const dlLabel = $derived(
-  dlProgress?.step === "binary"
-    ? `Binary ${dlProgress.pct}%`
-    : dlProgress?.step === "model"
-      ? `Modello ${dlProgress.pct}%`
-      : dlProgress?.step === "done"
-        ? "Completato"
-        : null,
+  dlProgress?.step === "model"
+    ? `Modello ${dlProgress.pct}%`
+    : dlProgress?.step === "done"
+      ? "Completato"
+      : null,
 );
 </script>
 
@@ -139,7 +137,7 @@ const dlLabel = $derived(
           <p class="m-0 text-sm font-medium text-green-400">Modello installato e pronto.</p>
         {:else}
           <p class="m-0 text-[0.82rem] leading-relaxed text-brand-cream/80">
-            Scarica whisper-server + modello large-v3-turbo (~1.5 GB).
+            Scarica il modello Whisper large-v3-turbo (~1.5 GB).
             Necessario solo al primo avvio.
           </p>
         {/if}

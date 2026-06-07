@@ -78,7 +78,7 @@ Indicatore stato server STT + pulsante ⚙ impostazioni (icona nuda `text-brand-
 
 ### `SettingsPanel` — `src/lib/SettingsPanel.svelte`
 
-Modal per setup e download modello Whisper.
+Modal per setup e download modello Whisper. (Il binario `whisper-server` non si scarica più — è bundled nell'app, vedi `docs/backend/stt.md`.)
 
 Logica:
 - Mount → `get_stt_settings` + `get_local_model_path` + `get_recordings_dir` + `listen("download-progress")`
@@ -92,7 +92,7 @@ Due gruppi "cartella", azioni raggruppate per pertinenza (non sparse) — botton
 Logica:
 - `pick_directory` → salva in `settings.modelDir`/`recordingsDir`; cambio cartella modello chiede conferma (nessuna migrazione automatica del file ~1.5GB — l'utente dovrà riscaricare nella nuova posizione, `localReady` viene resettato a `false`)
 - "Mostra nel Finder" → `revealItemInDir` (plugin opener). Per le registrazioni rivela `recordingsDir` (sempre creata da `get_recordings_dir`); per il modello rivela la cartella padre di `modelPath` invece del file — il file `.bin` potrebbe non esistere ancora se il modello non è stato scaricato, mentre `get_local_model_path` garantisce che la cartella esista
-- Durante download: progress bar 2 step (binary → model), label percentuale
+- Durante download: progress bar singolo step (modello), label percentuale
 - Save → `save_stt_settings` → `onSaved(settings)` → chiude modal → `ensureServer()`
 
 ### `RecordingItem` — `src/lib/RecordingItem.svelte`

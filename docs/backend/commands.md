@@ -34,7 +34,7 @@ pub struct RecordingStatus {
 
 | Command | Input | Output | Side effects |
 |---|---|---|---|
-| `download_local_model` | — | `Result<(), String>` | Scarica binary + modello, emette eventi `download-progress`, aggiorna settings |
+| `download_local_model` | — | `Result<(), String>` | Scarica il modello (binary già bundled nell'app), emette eventi `download-progress`, aggiorna settings |
 | `start_local_server` | — | `Result<(), String>` | Spawna whisper-server, attende fino a 60s |
 | `start_stt_server` | — | `Result<(), String>` | Alias di `start_local_server` |
 | `check_stt_server` | — | `String` | `"running"` o `"stopped"` |
@@ -43,10 +43,10 @@ pub struct RecordingStatus {
 
 | Command | Input | Output | Side effects |
 |---|---|---|---|
-| `transcribe_recording` | `path: String` | `Result<TranscriptResult, String>` | Legge file WAV, POST a whisper-server |
+| `transcribe_recording` | `path: String` | `Result<TranscriptResult, String>` | Legge WAV, converte in memoria a 16kHz/mono/16-bit (`prepare_for_whisper`), POST `/inference` a whisper-server |
 
 ## Eventi emessi (Rust → Frontend)
 
 | Evento | Payload | Quando |
 |---|---|---|
-| `download-progress` | `{ step: "binary"\|"model"\|"done", pct: number }` | Durante `download_local_model` |
+| `download-progress` | `{ step: "model"\|"done", pct: number }` | Durante `download_local_model` |
