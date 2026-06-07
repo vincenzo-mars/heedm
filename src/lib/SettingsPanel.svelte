@@ -1,6 +1,7 @@
 <script lang="ts">
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import type { DownloadProgress, SttSettings } from "./types";
 
 let {
@@ -15,11 +16,19 @@ let settings = $state<SttSettings | null>(null);
 let downloading = $state(false);
 let dlProgress = $state<DownloadProgress | null>(null);
 let localReady = $state(false);
+let modelPath = $state<string | null>(null);
+let recordingsDir = $state<string | null>(null);
 
 $effect(() => {
   invoke<SttSettings>("get_stt_settings").then((s) => {
     settings = s;
     localReady = s.localReady;
+  });
+  invoke<string>("get_local_model_path").then((p) => {
+    modelPath = p;
+  });
+  invoke<string>("get_recordings_dir").then((d) => {
+    recordingsDir = d;
   });
 
   const unlisten = listen<DownloadProgress>("download-progress", (e) => {
@@ -45,6 +54,40 @@ async function save() {
   await invoke("save_stt_settings", { settings: updated });
   onSaved(updated);
   onClose();
+}
+
+function revealModel() {
+  if (modelPath) revealItemInDir(modelPath);
+}
+
+function revealRecordings() {
+  if (recordingsDir) revealItemInDir(recordingsDir);
+}
+
+async function changeModelDir() {
+  if (!settings) return;
+  const dir = await invoke<string | null>("pick_directory");
+  if (!dir) return;
+  if (
+    !confirm(
+      "Cambiando cartella dovrai riscaricare il modello nella nuova posizione. Continuare?",
+    )
+  ) {
+    return;
+  }
+  settings = { ...settings, modelDir: dir, localReady: false };
+  localReady = false;
+  await invoke("save_stt_settings", { settings });
+  modelPath = await invoke<string>("get_local_model_path");
+}
+
+async function changeRecordingsDir() {
+  if (!settings) return;
+  const dir = await invoke<string | null>("pick_directory");
+  if (!dir) return;
+  settings = { ...settings, recordingsDir: dir };
+  await invoke("save_stt_settings", { settings });
+  recordingsDir = dir;
 }
 
 async function startDownload() {
@@ -85,18 +128,50 @@ const dlLabel = $derived(
             Scarica whisper-server + modello large-v3-turbo (~1.5 GB).
             Necessario solo al primo avvio.
           </p>
-          {#if downloading && dlProgress}
-            <div class="dl-progress">
-              <div class="dl-bar">
-                <div class="dl-fill" style={`width: ${dlProgress.pct}%`}></div>
-              </div>
-              <span class="dl-label">{dlLabel}</span>
-            </div>
-          {/if}
-          <button class="download-btn" onclick={startDownload} disabled={downloading}>
-            {downloading ? "Download in corso..." : "Scarica"}
-          </button>
         {/if}
+
+        <div class="path-row">
+          <span class="path-label">Cartella modello</span>
+          {#if modelPath}
+            <p class="model-path">{modelPath}</p>
+          {/if}
+          <button class="path-btn" onclick={changeModelDir}>Cambia cartella</button>
+        </div>
+
+        <div class="path-row">
+          <span class="path-label">Cartella registrazioni</span>
+          {#if recordingsDir}
+            <p class="model-path">{recordingsDir}</p>
+          {/if}
+          <div class="path-actions">
+            <button class="path-btn" onclick={changeRecordingsDir}>Cambia cartella</button>
+            {#if recordingsDir}
+              <button class="reveal-btn" onclick={revealRecordings}>Mostra nel Finder</button>
+            {/if}
+          </div>
+        </div>
+
+        {#if downloading && dlProgress}
+          <div class="dl-progress">
+            <div class="dl-bar">
+              <div class="dl-fill" style={`width: ${dlProgress.pct}%`}></div>
+            </div>
+            <span class="dl-label">{dlLabel}</span>
+          </div>
+        {/if}
+
+        <div class="model-actions">
+          <button class="download-btn" onclick={startDownload} disabled={downloading}>
+            {downloading
+              ? "Download in corso..."
+              : localReady
+                ? "Scarica di nuovo"
+                : "Scarica"}
+          </button>
+          {#if localReady}
+            <button class="reveal-btn" onclick={revealModel}>Mostra nel Finder</button>
+          {/if}
+        </div>
       </div>
 
       <button class="save-btn" onclick={save}>

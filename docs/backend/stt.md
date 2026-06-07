@@ -22,21 +22,32 @@ app → whisper-server (127.0.0.1:8080) → modello ggml → TranscriptResult
 
 ## Percorsi su disco
 
-Tutti relativi a `app_data_dir` (macOS: `~/Library/Application Support/com.vincenzomars.heedm/`):
+| File | Percorso default | Configurabile |
+|---|---|---|
+| Binary | `{model_dir}/bin/whisper-server` | sì, via `settings.model_dir` |
+| Modello | `{model_dir}/models/ggml-large-v3-turbo.bin` | sì, via `settings.model_dir` |
+| Settings | `app_data_dir/settings.json` | no |
+| Registrazioni WAV | `{recordings_dir}/Registrazione <YYYY-MM-DD HH.MM.SS>.wav` | sì, via `settings.recordings_dir` |
 
-| File | Percorso |
-|---|---|
-| Binary | `bin/whisper-server` |
-| Modello | `models/ggml-large-v3-turbo.bin` |
-| Settings | `settings.json` |
+Default quando l'utente non ha scelto un percorso (`model_dir`/`recordings_dir` = `null`):
+- `model_dir` → `app_data_dir` (macOS: `~/Library/Application Support/com.vincenzomars.heedm/`) — dati app persistenti, non visibili in Finder normale
+- `recordings_dir` → `audio_dir()/Heedm/Records` (macOS: `~/Music/Heedm/Records/`) — cartella standard contenuti audio, visibile e indicizzata da Spotlight; sottocartella `Records` separa le registrazioni da eventuali altri file dell'app dentro `Heedm`
+
+Nome file generato con timestamp leggibile locale (`chrono::Local::now()`, formato `%Y-%m-%d %H.%M.%S`), es. `Registrazione 2026-06-07 15.30.12.wav`.
+
+Funzioni helper in `commands.rs`: `model_dir`, `local_bin_path`, `local_model_path`, `default_recordings_dir`, `recordings_dir` — tutte prendono `&SttSettings` già caricato per evitare letture multiple di `settings.json`.
+
+**Nota cambio `model_dir`:** non c'è migrazione automatica dei file (binary + modello ~1.5GB). Cambiando cartella, l'app non trova più binary/modello nel nuovo percorso e richiede un nuovo download lì. Il pannello impostazioni avvisa l'utente prima del cambio.
 
 ## Strutture dati
 
 ### `SttSettings`
 ```rust
 pub struct SttSettings {
-    pub local_ready: bool,   // binario + modello presenti su disco
-    pub configured: bool,    // utente ha completato setup
+    pub local_ready: bool,           // binario + modello presenti su disco
+    pub configured: bool,            // utente ha completato setup
+    pub model_dir: Option<String>,   // None = default (app_data_dir)
+    pub recordings_dir: Option<String>, // None = default (audio_dir/Heedm)
 }
 ```
 Serializzata come JSON in `settings.json` (camelCase).
@@ -62,6 +73,14 @@ pub struct TranscriptSegment {
     pub speaker: Option<String>,  // es. "SPEAKER_00"
 }
 ```
+
+## Comandi percorso
+
+| Comando | Ritorna | Uso |
+|---|---|---|
+| `get_local_model_path` | path assoluto del file modello | mostrato in UI + "Mostra nel Finder" |
+| `get_recordings_dir` | path assoluto cartella registrazioni corrente | mostrato in UI + "Mostra nel Finder" |
+| `pick_directory` | `Option<String>` (cartella scelta o `None` se annullato) | dialog `pick_folder`, riusato sia per modello che registrazioni |
 
 ## Flusso download (`download_local_model`)
 

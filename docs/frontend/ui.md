@@ -43,9 +43,13 @@ Indicatore stato server STT + pulsante ⚙ impostazioni.
 Modal per setup e download modello Whisper.
 
 Logica:
-- Mount → `get_stt_settings` + `listen("download-progress")`
+- Mount → `get_stt_settings` + `get_local_model_path` + `get_recordings_dir` + `listen("download-progress")`
 - Se `localReady`: mostra messaggio "Modello installato e pronto"
-- Altrimenti: mostra warning dimensioni + pulsante "Scarica"
+- Altrimenti: mostra warning dimensioni
+- Due righe percorso (`.path-row`): "Cartella modello" e "Cartella registrazioni", ciascuna con path corrente (sola lettura) + pulsante "Cambia cartella" (`pick_directory` → salva in `settings.modelDir`/`recordingsDir`)
+  - Cambio cartella modello: chiede conferma (nessuna migrazione automatica del file ~1.5GB — l'utente dovrà riscaricare nella nuova posizione, `localReady` viene resettato a `false`)
+  - Entrambe le righe hanno "Mostra nel Finder" → `revealItemInDir` (plugin opener)
+- Pulsante "Scarica" / "Scarica di nuovo" (label cambia in base a `localReady`)
 - Durante download: progress bar 2 step (binary → model), label percentuale
 - Save → `save_stt_settings` → `onSaved(settings)` → chiude modal → `ensureServer()`
 
@@ -75,6 +79,8 @@ Definiti in `src/lib/types.ts`.
 interface SttSettings {
   localReady: boolean;
   configured: boolean;
+  modelDir: string | null;      // null = default (app_data_dir)
+  recordingsDir: string | null; // null = default (audio_dir/Heedm)
 }
 
 interface Recording {

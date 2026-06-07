@@ -28,6 +28,8 @@ const MODEL_URL: &str =
 pub struct SttSettings {
     pub local_ready: bool,
     pub configured: bool,
+    pub model_dir: Option<String>,
+    pub recordings_dir: Option<String>,
 }
 
 impl Default for SttSettings {
@@ -35,6 +37,8 @@ impl Default for SttSettings {
         Self {
             local_ready: false,
             configured: false,
+            model_dir: None,
+            recordings_dir: None,
         }
     }
 }
@@ -49,12 +53,36 @@ fn settings_path(app: &AppHandle) -> PathBuf {
     app_data_dir(app).join("settings.json")
 }
 
-fn local_bin_path(app: &AppHandle) -> PathBuf {
-    app_data_dir(app).join("bin").join("whisper-server")
+fn model_dir(app: &AppHandle, settings: &SttSettings) -> PathBuf {
+    match &settings.model_dir {
+        Some(dir) => PathBuf::from(dir),
+        None => app_data_dir(app),
+    }
 }
 
-fn local_model_path(app: &AppHandle) -> PathBuf {
-    app_data_dir(app).join("models").join("ggml-large-v3-turbo.bin")
+fn local_bin_path(app: &AppHandle, settings: &SttSettings) -> PathBuf {
+    model_dir(app, settings).join("bin").join("whisper-server")
+}
+
+fn local_model_path(app: &AppHandle, settings: &SttSettings) -> PathBuf {
+    model_dir(app, settings)
+        .join("models")
+        .join("ggml-large-v3-turbo.bin")
+}
+
+fn default_recordings_dir(app: &AppHandle) -> PathBuf {
+    app.path()
+        .audio_dir()
+        .unwrap_or_else(|_| app_data_dir(app))
+        .join("Heedm")
+        .join("Records")
+}
+
+fn recordings_dir(app: &AppHandle, settings: &SttSettings) -> PathBuf {
+    match &settings.recordings_dir {
+        Some(dir) => PathBuf::from(dir),
+        None => default_recordings_dir(app),
+    }
 }
 
 #[tauri::command]
@@ -83,7 +111,36 @@ pub async fn save_stt_settings(app: AppHandle, settings: SttSettings) -> Result<
 
 #[tauri::command]
 pub async fn get_local_model_status(app: AppHandle) -> bool {
-    local_bin_path(&app).exists() && local_model_path(&app).exists()
+    let settings = get_stt_settings(app.clone()).await;
+    local_bin_path(&app, &settings).exists() && local_model_path(&app, &settings).exists()
+}
+
+#[tauri::command]
+pub async fn get_local_model_path(app: AppHandle) -> String {
+    let settings = get_stt_settings(app.clone()).await;
+    local_model_path(&app, &settings).to_string_lossy().into_owned()
+}
+
+#[tauri::command]
+pub async fn get_recordings_dir(app: AppHandle) -> String {
+    let settings = get_stt_settings(app.clone()).await;
+    let dir = recordings_dir(&app, &settings);
+    tokio::fs::create_dir_all(&dir).await.ok();
+    dir.to_string_lossy().into_owned()
+}
+
+#[tauri::command]
+pub async fn pick_directory(app: AppHandle) -> Option<String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .blocking_pick_folder()
+            .and_then(|fp| fp.into_path().ok())
+            .map(|p| p.to_string_lossy().into_owned())
+    })
+    .await
+    .ok()
+    .flatten()
 }
 
 // ── Download ──────────────────────────────────────────────────────────────────
@@ -91,9 +148,10 @@ pub async fn get_local_model_status(app: AppHandle) -> bool {
 #[tauri::command]
 pub async fn download_local_model(app: AppHandle) -> Result<(), String> {
     let client = reqwest::Client::new();
+    let settings = get_stt_settings(app.clone()).await;
 
     // 1. Download binary zip
-    let bin_path = local_bin_path(&app);
+    let bin_path = local_bin_path(&app, &settings);
     tokio::fs::create_dir_all(bin_path.parent().unwrap())
         .await
         .map_err(|e| e.to_string())?;
@@ -159,7 +217,7 @@ pub async fn download_local_model(app: AppHandle) -> Result<(), String> {
     .map_err(|e| e.to_string())??;
 
     // 2. Download model
-    let model_path = local_model_path(&app);
+    let model_path = local_model_path(&app, &settings);
     tokio::fs::create_dir_all(model_path.parent().unwrap())
         .await
         .map_err(|e| e.to_string())?;
@@ -214,8 +272,9 @@ pub async fn start_local_server(app: AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
-    let bin = local_bin_path(&app);
-    let model = local_model_path(&app);
+    let settings = get_stt_settings(app.clone()).await;
+    let bin = local_bin_path(&app, &settings);
+    let model = local_model_path(&app, &settings);
 
     if !bin.exists() || !model.exists() {
         return Err("Modello locale non scaricato".to_string());
@@ -375,20 +434,14 @@ pub async fn stop_recording(
         (mixer::mix(&mic, &sys), sr, ch)
     };
 
-    let path: Option<PathBuf> = tauri::async_runtime::spawn_blocking(move || {
-        app.dialog()
-            .file()
-            .add_filter("WAV Audio", &["wav"])
-            .blocking_save_file()
-            .and_then(|fp| fp.into_path().ok())
-    })
-    .await
-    .map_err(|e| e.to_string())?;
+    let settings = get_stt_settings(app.clone()).await;
+    let dir = recordings_dir(&app, &settings);
+    tokio::fs::create_dir_all(&dir)
+        .await
+        .map_err(|e| e.to_string())?;
 
-    let path = match path {
-        Some(p) => p,
-        None => return Ok(String::new()),
-    };
+    let timestamp = chrono::Local::now().format("%Y-%m-%d %H.%M.%S");
+    let path = dir.join(format!("Registrazione {timestamp}.wav"));
 
     writer::write_wav(&mixed, &path, sample_rate, channels)?;
     Ok(path.to_string_lossy().to_string())

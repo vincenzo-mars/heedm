@@ -19,6 +19,9 @@ pub fn run() {
             commands::get_stt_settings,
             commands::save_stt_settings,
             commands::get_local_model_status,
+            commands::get_local_model_path,
+            commands::get_recordings_dir,
+            commands::pick_directory,
             commands::download_local_model,
             commands::start_local_server,
         ])

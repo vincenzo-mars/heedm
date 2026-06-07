@@ -8,6 +8,8 @@ export interface RecordingStatus {
 export interface SttSettings {
   localReady: boolean;
   configured: boolean;
+  modelDir: string | null;
+  recordingsDir: string | null;
 }
 
 export interface DownloadProgress {

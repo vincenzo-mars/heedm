@@ -257,6 +257,69 @@ body {
   margin: 0;
 }
 
+.model-path {
+  font-size: 0.72rem;
+  color: #999;
+  font-family: ui-monospace, monospace;
+  word-break: break-all;
+  margin: 0;
+}
+
+.model-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.path-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.path-label {
+  font-size: 0.78rem;
+  color: #666;
+  font-weight: 600;
+}
+
+.path-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.path-btn {
+  align-self: flex-start;
+  padding: 7px 14px;
+  background: transparent;
+  color: #3b82f6;
+  border: 1px solid #3b82f6;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.path-btn:hover {
+  background: rgba(59, 130, 246, 0.1);
+}
+
+.reveal-btn {
+  padding: 9px 16px;
+  background: transparent;
+  color: #3b82f6;
+  border: 1px solid #3b82f6;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.reveal-btn:hover {
+  background: rgba(59, 130, 246, 0.1);
+}
+
 .dl-progress {
   display: flex;
   flex-direction: column;
