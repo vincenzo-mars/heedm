@@ -1,5 +1,9 @@
 # Architettura
 
+## Struttura repo
+
+`src/` (frontend Svelte) + `src-tauri/` (backend Rust) a top-level: layout standard generato da `npm create tauri-app` / template ufficiali Tauri+Vite. `src-tauri/` deve restare a root perché Cargo.toml e config bundler usano path relativi fissi rispetto alla root del progetto. Layout monorepo (`apps/frontend` + `apps/backend`) avrebbe senso solo con più target/build separate da condividere — non è il caso qui (single-app desktop).
+
 ## Flusso dati end-to-end
 
 ```
