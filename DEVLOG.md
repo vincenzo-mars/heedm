@@ -13,6 +13,22 @@ Formato:
 
 ---
 
+## 2026-06-07 — Setup linting/formatting con Biome
+
+**Obiettivo:** Lint e format consistenti su TS/Svelte/JSON, sostituendo strumenti sparsi.
+
+**Fatto:**
+- Aggiunto `biome.json`: indent 2 spazi, virgolette doppie, organize imports on save
+- `noUnusedImports`/`noUnusedVariables` disabilitati per `*.svelte` — Biome non parsa il markup Svelte, quindi segnala falsi positivi su import/variabili usati solo nel template
+- Script `npm run lint` / `lint:fix` in `package.json`
+- Primo pass di formattazione su tutto il repo (`App.css` e altri file riformattati)
+- Doc aggiornato: `docs/frontend/ui.md`
+
+**Decisioni:**
+- Biome al posto di ESLint+Prettier separati — un solo tool, config unica, più veloce
+
+---
+
 ## 2026-06-07 — Migrazione frontend React → Svelte
 
 **Obiettivo:** Sostituire React con Svelte 5, ridurre dipendenze e bundle size.

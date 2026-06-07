@@ -104,9 +104,6 @@ function handleSettingsSaved(_s: SttSettings) {
 
 <div class="app">
   <main class="recorder-section">
-    <h1>heedm</h1>
-    <SttIndicator status={sttStatus} onSettingsClick={() => (showSettings = true)} />
-
     <button
       class={`rec-btn${isRecording ? " recording" : ""}`}
       onclick={handleRecord}
@@ -131,6 +128,8 @@ function handleSettingsSaved(_s: SttSettings) {
       {/each}
     </section>
   {/if}
+
+  <SttIndicator status={sttStatus} onSettingsClick={() => (showSettings = true)} />
 
   {#if showSettings}
     <SettingsPanel onClose={() => (showSettings = false)} onSaved={handleSettingsSaved} />
