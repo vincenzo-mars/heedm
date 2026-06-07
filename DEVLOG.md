@@ -13,6 +13,21 @@ Formato:
 
 ---
 
+## 2026-06-07 — Sezione "Permessi" nelle impostazioni (microfono + registrazione schermo)
+
+**Obiettivo:** l'app richiede due permessi macOS (microfono, registrazione schermo per ScreenCaptureKit) ma non offriva alcun modo, da dentro l'app, di sapere se erano concessi né di raggiungere il pannello di sistema giusto — screen recording mancante falliva *silenziosamente* (`eprintln!` lato Rust), mic mancante mostrava solo l'errore grezzo di `cpal`. L'unica doc di "dove abilitarli" viveva nella memory di sviluppo, non nell'app.
+
+**Fatto:**
+- Nuovo modulo `src-tauri/src/permissions.rs` (top-level, non sotto `recorder/`: è OS integration, non audio):
+  - `screen_recording_granted()`/`request_screen_recording()` — FFI minimale verso `CGPreflightScreenCaptureAccess`/`CGRequestScreenCaptureAccess` (CoreGraphics, framework pubblico, **zero nuove dipendenze Cargo**); stub `true`/no-op su target non-macOS
+  - `open_settings_pane(PermissionPane)` — apre il pannello Privacy & Security pertinente via `open x-apple.systempreferences:...?Privacy_Microphone|Privacy_ScreenCapture`; routing su enum chiuso, mai stringa utente nel comando di sistema
+- Nuovi command: `check_screen_recording_permission`, `request_screen_recording_permission`, `open_permission_settings(pane: "microphone"|"screen-recording")` (valida l'input, `Err` su valori sconosciuti)
+- `SettingsPanel.svelte`: nuova sezione "Permessi" in cima al modal (rinominato da "Trascrizione" a "Impostazioni" — ora copre più che STT) — riquadro Microfono (descrizione + CTA apri impostazioni) e riquadro Registrazione schermo (pallino di stato stile `SttIndicator` + CTA "Richiedi accesso"/"Apri Impostazioni di Sistema")
+
+**Decisioni:** nessuno stato live per il microfono. L'unica API per l'authorization status è `AVCaptureDevice.authorizationStatus(for:)`, un metodo Objective-C — richiederebbe bridging `objc2`/AVFoundation (non presenti come dipendenza diretta, solo crate correlati trasportati transitivamente da `screencapturekit`) per mostrare un singolo pallino colorato. Un'indicazione di stato sbagliata o stantia sarebbe peggio di nessuna — meglio descrizione + CTA e basta.
+
+---
+
 ## 2026-06-07 — Rimosso label `Silence` dalla diarizzazione
 
 **Obiettivo:** eliminare il concetto di "silenzio" dalla diarizzazione "a 2 vie" — etichetta in pratica mai utile in UI (un blob grigio "Silenzio" tra due interventi non aggiunge informazione) e fonte di rumore nel timeline (soglia `SILENCE_RMS` arbitraria che spezzava intervalli altrimenti contigui).

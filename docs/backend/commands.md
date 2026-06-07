@@ -39,6 +39,23 @@ pub struct RecordingStatus {
 | `start_stt_server` | — | `Result<(), String>` | Alias di `start_local_server` |
 | `check_stt_server` | — | `String` | `"running"` o `"stopped"` |
 
+## Permessi OS (macOS)
+
+Wrapper sottili attorno a `permissions.rs` (CoreGraphics FFI + `open` di System
+Settings) — vedi `docs/architecture.md` per il modulo. Su piattaforme diverse
+da macOS gli stub ritornano sempre stato "concesso"/no-op.
+
+| Command | Input | Output | Side effects |
+|---|---|---|---|
+| `check_screen_recording_permission` | — | `bool` | `CGPreflightScreenCaptureAccess` — sola lettura, nessun prompt |
+| `request_screen_recording_permission` | — | `bool` | `CGRequestScreenCaptureAccess` — innesca il prompt di sistema se lo stato non è ancora deciso, altrimenti no-op |
+| `open_permission_settings` | `pane: "microphone" \| "screen-recording"` | `Result<(), String>` | Apre il pannello Privacy & Security pertinente in System Settings via `open x-apple.systempreferences:...`; valore di `pane` non riconosciuto → `Err` (mai passato al comando di sistema) |
+
+Nota: per il microfono non esiste un check di stato — l'unica API è
+`AVCaptureDevice.authorizationStatus`, un metodo Objective-C che richiederebbe
+bridging `objc2`/AVFoundation solo per un'indicazione di stato. Si espone solo
+la CTA per aprire il pannello di sistema (vedi `docs/frontend/ui.md`).
+
 ## STT — Trascrizione
 
 | Command | Input | Output | Side effects |

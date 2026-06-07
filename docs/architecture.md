@@ -60,6 +60,7 @@
 | Backend | Rust async (tokio) | Registrazione, download, gestione server STT |
 | Audio capture | cpal | Microfono cross-platform |
 | System audio | ScreenCaptureKit (macOS) | Cattura audio di sistema |
+| OS permissions | CoreGraphics FFI + `open` (macOS) | `permissions.rs` — stato/richiesta permesso registrazione schermo, CTA per aprire i pannelli Privacy & Security (vedi `docs/backend/commands.md` → Permessi OS) |
 | STT | whisper.cpp server | Trascrizione locale, API OpenAI-compatible |
 | File I/O | hound | Scrittura WAV |
 

@@ -7,6 +7,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 use tokio::io::AsyncWriteExt;
 
+use crate::permissions;
 use crate::recorder::{diarization, mic, mixer, system_audio, writer, RecorderState};
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -255,6 +256,28 @@ pub async fn check_stt_server(_app: AppHandle) -> String {
 #[tauri::command]
 pub async fn start_stt_server(app: AppHandle) -> Result<(), String> {
     start_local_server(app).await
+}
+
+// ── Permissions ────────────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub fn check_screen_recording_permission() -> bool {
+    permissions::screen_recording_granted()
+}
+
+#[tauri::command]
+pub fn request_screen_recording_permission() -> bool {
+    permissions::request_screen_recording()
+}
+
+#[tauri::command]
+pub fn open_permission_settings(pane: String) -> Result<(), String> {
+    let pane = match pane.as_str() {
+        "microphone" => permissions::PermissionPane::Microphone,
+        "screen-recording" => permissions::PermissionPane::ScreenRecording,
+        other => return Err(format!("Pannello permessi sconosciuto: {other}")),
+    };
+    permissions::open_settings_pane(pane)
 }
 
 // ── Transcription ─────────────────────────────────────────────────────────────

@@ -1,4 +1,5 @@
 mod commands;
+mod permissions;
 mod recorder;
 
 use recorder::RecorderState;
@@ -24,6 +25,9 @@ pub fn run() {
             commands::pick_directory,
             commands::download_local_model,
             commands::start_local_server,
+            commands::check_screen_recording_permission,
+            commands::request_screen_recording_permission,
+            commands::open_permission_settings,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

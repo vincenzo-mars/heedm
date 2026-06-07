@@ -78,10 +78,14 @@ Indicatore stato server STT + pulsante ⚙ impostazioni (icona nuda `text-brand-
 
 ### `SettingsPanel` — `src/lib/SettingsPanel.svelte`
 
-Modal per setup e download modello Whisper. (Il binario `whisper-server` non si scarica più — è bundled nell'app, vedi `docs/backend/stt.md`.)
+Modal "Impostazioni": permessi OS, setup/download modello Whisper, cartelle. (Il binario `whisper-server` non si scarica più — è bundled nell'app, vedi `docs/backend/stt.md`.) Contenitore `max-h-[85vh]`, corpo centrale `overflow-y-auto`/`min-h-0` — header e bottone "Salva" restano fissi, le sezioni scrollano (sempre più sezioni di quante ne entrino in 90vw×640px).
+
+**Sezione Permessi** (prima — i permessi bloccano tutto il resto), riquadri `bg-brand-dark/50`:
+- **Microfono**: descrizione + `[Apri Impostazioni di Sistema]` → `open_permission_settings({ pane: "microphone" })`. Niente stato live: l'unica API di sistema per lo stato di autorizzazione è `AVCaptureDevice.authorizationStatus`, Objective-C — bridging `objc2` solo per un pallino non vale la complessità (vedi `docs/backend/commands.md` → Permessi OS)
+- **Registrazione schermo**: pallino di stato (stesso linguaggio di `SttIndicator` — `bg-green-500` concesso / `bg-gray-400` da concedere), popolato da `check_screen_recording_permission` al mount → `[Richiedi accesso]` (visibile solo se non concesso, chiama `request_screen_recording_permission` poi ri-controlla lo stato) + `[Apri Impostazioni di Sistema]`
 
 Logica:
-- Mount → `get_stt_settings` + `get_local_model_path` + `get_recordings_dir` + `listen("download-progress")`
+- Mount → `get_stt_settings` + `get_local_model_path` + `get_recordings_dir` + `check_screen_recording_permission` + `listen("download-progress")`
 - Se `localReady`: mostra messaggio "Modello installato e pronto"
 - Altrimenti: mostra warning dimensioni
 
