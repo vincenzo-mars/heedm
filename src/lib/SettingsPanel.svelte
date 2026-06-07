@@ -57,7 +57,10 @@ async function save() {
 }
 
 function revealModel() {
-  if (modelPath) revealItemInDir(modelPath);
+  if (!modelPath) return;
+  // Il file modello potrebbe non esistere ancora (download non fatto) — rivela la cartella che lo conterrà
+  const dir = modelPath.slice(0, modelPath.lastIndexOf("/"));
+  revealItemInDir(dir);
 }
 
 function revealRecordings() {
@@ -113,68 +116,113 @@ const dlLabel = $derived(
 </script>
 
 {#if settings}
-  <div class="settings-backdrop" role="presentation" onclick={onClose}>
-    <div class="settings-panel" role="presentation" onclick={(e) => e.stopPropagation()}>
-      <div class="settings-header">
-        <span class="settings-title">Trascrizione</span>
-        <button class="settings-close" onclick={onClose}>✕</button>
+  <div
+    class="fixed inset-0 z-[100] flex items-center justify-center bg-black/50"
+    role="presentation"
+    onclick={onClose}
+  >
+    <div
+      class="flex w-[min(420px,90vw)] flex-col gap-5 rounded-2xl bg-brand-darker p-6 text-brand-cream shadow-[0_20px_60px_rgba(0,0,0,0.5)]"
+      role="presentation"
+      onclick={(e) => e.stopPropagation()}
+    >
+      <div class="flex items-center justify-between">
+        <span class="text-base font-bold">Trascrizione</span>
+        <button
+          class="text-base leading-none text-brand-cream opacity-40 transition-opacity hover:opacity-100"
+          onclick={onClose}>✕</button
+        >
       </div>
 
-      <div class="mode-content">
+      <div class="flex flex-col gap-4">
         {#if localReady}
-          <p class="local-ready">Modello installato e pronto.</p>
+          <p class="m-0 text-sm font-medium text-green-400">Modello installato e pronto.</p>
         {:else}
-          <p class="local-warning">
+          <p class="m-0 text-[0.82rem] leading-relaxed text-brand-cream/80">
             Scarica whisper-server + modello large-v3-turbo (~1.5 GB).
             Necessario solo al primo avvio.
           </p>
         {/if}
 
-        <div class="path-row">
-          <span class="path-label">Cartella modello</span>
+        <div class="flex flex-col gap-1.5">
+          <span class="text-[0.78rem] font-semibold text-brand-cream">Cartella modello</span>
           {#if modelPath}
-            <p class="model-path">{modelPath}</p>
+            <div class="flex flex-col gap-1 rounded-lg border border-brand-cream/10 bg-brand-dark/50 px-2.5 py-2">
+              <span class="text-[0.62rem] font-semibold tracking-wider text-brand-cream/40 uppercase"
+                >Percorso</span
+              >
+              <p class="m-0 font-mono text-[0.72rem] break-all text-brand-cream/70">{modelPath}</p>
+            </div>
           {/if}
-          <button class="path-btn" onclick={changeModelDir}>Cambia cartella</button>
-        </div>
-
-        <div class="path-row">
-          <span class="path-label">Cartella registrazioni</span>
-          {#if recordingsDir}
-            <p class="model-path">{recordingsDir}</p>
-          {/if}
-          <div class="path-actions">
-            <button class="path-btn" onclick={changeRecordingsDir}>Cambia cartella</button>
-            {#if recordingsDir}
-              <button class="reveal-btn" onclick={revealRecordings}>Mostra nel Finder</button>
+          <div class="flex gap-2">
+            <button
+              class="flex-1 rounded-lg border border-brand-light px-4 py-2.5 text-[0.8rem] font-semibold text-brand-light transition hover:bg-brand-light/10"
+              onclick={changeModelDir}>Cambia cartella</button
+            >
+            {#if modelPath}
+              <button
+                class="flex-1 rounded-lg border border-brand-light px-4 py-2.5 text-[0.8rem] font-semibold text-brand-light transition hover:bg-brand-light/10"
+                onclick={revealModel}>Mostra nel Finder</button
+              >
             {/if}
           </div>
-        </div>
 
-        {#if downloading && dlProgress}
-          <div class="dl-progress">
-            <div class="dl-bar">
-              <div class="dl-fill" style={`width: ${dlProgress.pct}%`}></div>
+          {#if downloading && dlProgress}
+            <div class="flex flex-col gap-1 pt-1">
+              <div class="h-1.5 overflow-hidden rounded-full bg-brand-dark">
+                <div
+                  class="h-full rounded-full bg-brand-lighter transition-[width] duration-300"
+                  style={`width: ${dlProgress.pct}%`}
+                ></div>
+              </div>
+              <span class="text-xs text-brand-cream/55">{dlLabel}</span>
             </div>
-            <span class="dl-label">{dlLabel}</span>
-          </div>
-        {/if}
+          {/if}
 
-        <div class="model-actions">
-          <button class="download-btn" onclick={startDownload} disabled={downloading}>
+          <button
+            class="rounded-lg bg-brand-lighter px-4 py-2.5 text-[0.85rem] font-semibold text-brand-cream transition hover:bg-brand-lightest disabled:cursor-not-allowed disabled:bg-brand-light/30"
+            onclick={startDownload}
+            disabled={downloading}
+          >
             {downloading
               ? "Download in corso..."
               : localReady
                 ? "Scarica di nuovo"
                 : "Scarica"}
           </button>
-          {#if localReady}
-            <button class="reveal-btn" onclick={revealModel}>Mostra nel Finder</button>
+        </div>
+
+        <div class="flex flex-col gap-1.5">
+          <span class="text-[0.78rem] font-semibold text-brand-cream">Cartella registrazioni</span>
+          {#if recordingsDir}
+            <div class="flex flex-col gap-1 rounded-lg border border-brand-cream/10 bg-brand-dark/50 px-2.5 py-2">
+              <span class="text-[0.62rem] font-semibold tracking-wider text-brand-cream/40 uppercase"
+                >Percorso</span
+              >
+              <p class="m-0 font-mono text-[0.72rem] break-all text-brand-cream/70">
+                {recordingsDir}
+              </p>
+            </div>
           {/if}
+          <div class="flex gap-2">
+            <button
+              class="flex-1 rounded-lg border border-brand-light px-4 py-2.5 text-[0.8rem] font-semibold text-brand-light transition hover:bg-brand-light/10"
+              onclick={changeRecordingsDir}>Cambia cartella</button
+            >
+            {#if recordingsDir}
+              <button
+                class="flex-1 rounded-lg border border-brand-light px-4 py-2.5 text-[0.8rem] font-semibold text-brand-light transition hover:bg-brand-light/10"
+                onclick={revealRecordings}>Mostra nel Finder</button
+              >
+            {/if}
+          </div>
         </div>
       </div>
 
-      <button class="save-btn" onclick={save}>
+      <button
+        class="rounded-lg bg-brand-cream p-2.5 text-sm font-semibold text-brand-ink transition hover:bg-brand-light"
+        onclick={save}
+      >
         Salva
       </button>
     </div>

@@ -78,7 +78,7 @@ pub struct TranscriptSegment {
 
 | Comando | Ritorna | Uso |
 |---|---|---|
-| `get_local_model_path` | path assoluto del file modello | mostrato in UI + "Mostra nel Finder" |
+| `get_local_model_path` | path assoluto del file modello | mostrato in UI; crea sempre la cartella padre (`models/`) se assente, così "Mostra nel Finder" funziona anche prima del download (rivela la cartella, non il file — che potrebbe non esistere ancora) |
 | `get_recordings_dir` | path assoluto cartella registrazioni corrente | mostrato in UI + "Mostra nel Finder" |
 | `pick_directory` | `Option<String>` (cartella scelta o `None` se annullato) | dialog `pick_folder`, riusato sia per modello che registrazioni |
 

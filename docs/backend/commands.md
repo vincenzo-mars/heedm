@@ -26,7 +26,7 @@ pub struct RecordingStatus {
 | `get_stt_settings` | — | `SttSettings` | Legge `settings.json`, ritorna default se assente |
 | `save_stt_settings` | `settings: SttSettings` | `Result<(), String>` | Scrive `settings.json` |
 | `get_local_model_status` | — | `bool` | Controlla esistenza file su disco |
-| `get_local_model_path` | — | `String` | Path assoluto del modello (rispetta `model_dir` se impostato) |
+| `get_local_model_path` | — | `String` | Path assoluto del modello (rispetta `model_dir` se impostato); crea la cartella padre se assente |
 | `get_recordings_dir` | — | `String` | Path assoluto cartella registrazioni corrente (rispetta `recordings_dir` se impostato) |
 | `pick_directory` | — | `Option<String>` | Apre dialog "scegli cartella", `None` se annullato |
 

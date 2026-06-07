@@ -13,8 +13,8 @@
     "windows": [
       {
         "title": "Heedm",
-        "width": 480,
-        "height": 360
+        "width": 860,
+        "height": 640
       }
     ],
     "security": {

@@ -118,7 +118,11 @@ pub async fn get_local_model_status(app: AppHandle) -> bool {
 #[tauri::command]
 pub async fn get_local_model_path(app: AppHandle) -> String {
     let settings = get_stt_settings(app.clone()).await;
-    local_model_path(&app, &settings).to_string_lossy().into_owned()
+    let path = local_model_path(&app, &settings);
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent).await.ok();
+    }
+    path.to_string_lossy().into_owned()
 }
 
 #[tauri::command]

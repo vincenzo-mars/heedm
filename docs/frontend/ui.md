@@ -4,6 +4,44 @@ File: `src/App.svelte`, `src/lib/*.svelte`, `src/lib/types.ts`, `src/App.css`
 
 UI in Svelte 5 (runes: `$state`, `$derived`, `$effect`, `$props`), un componente per file sotto `src/lib/`. Tipi e helper condivisi in `src/lib/types.ts`. Nessuna libreria di state management esterna.
 
+## Styling — Tailwind CSS v4 + design system colori
+
+Stili applicati con utility Tailwind inline nei template (nessun componente ha `<style>` proprio, nessuna classe globale `.foo`). `src/App.css` contiene solo: `@import "tailwindcss"`, token `@theme`, reset base (`@layer base`) e `@keyframes` custom.
+
+Setup (config CSS-first, Tailwind v4 — niente `tailwind.config.js`):
+- `vite.config.ts`: plugin `@tailwindcss/vite` registrato in `plugins`
+- `src/App.css`: `@import "tailwindcss";` in testa
+
+### Design tokens (`@theme` in `App.css`)
+
+Palette brand, namespace `brand-*` per non collidere con i token base di Tailwind (`white`/`black`):
+
+| Token | Hex | Uso |
+|---|---|---|
+| `brand-dark` | `#290808` | sfondo app |
+| `brand-darker` | `#120404` | superfici/card/pannelli, barre progresso |
+| `brand-light` | `#c4807f` | accenti tenui, bordi/testo bottoni outline, badge "trascrizione" |
+| `brand-lighter` | `#ab2b29` | bottone REC (idle), bottone download, riempimento progress bar |
+| `brand-lightest` | `#d23434` | bottone REC (hover/recording), timer, glow pulse |
+| `brand-cream` | `#fdf6f6` | testo su sfondo scuro |
+| `brand-ink` | `#020000` | testo su superfici chiare (es. bottone "Salva") |
+
+Genera utility `bg-brand-*`, `text-brand-*`, `border-brand-*`, ecc. Usate sempre con opacità frazionaria (`/10`, `/40`, `/85`...) per superfici e testo secondario invece di colori grigi separati.
+
+Stati semantici **non** seguono la palette brand — restano i default Tailwind per chiarezza UX:
+- successo (`localReady`, badge "fatto") → `green-400`/`green-500`/`green-950`
+- errore (banner errore, badge "errore", stato STT `error`) → `red-400`/`red-800`/`red-950`
+- avvio server STT → `amber-500`; stato "checking" → `gray-400`
+
+`SPEAKER_COLORS`/`speakerColor()` in `src/lib/types.ts` restano una palette separata (8 colori per distinguere speaker), non fanno parte del design system brand.
+
+### Animazioni custom (`@keyframes` in `App.css`)
+
+Tailwind non ha keyframes con questi nomi/timing — definiti in plain CSS e applicati via arbitrary value (`animate-[nome_durata_easing_infinite]`):
+- `pulse-rec` — glow pulsante del bottone REC durante registrazione (nome custom per non collidere con `animate-pulse` di Tailwind)
+- `blink` — dot di stato STT, puntini "trascrizione..."
+- `shimmer` — skeleton loading durante trascrizione
+
 ## Lint & format
 
 Biome (`biome.json`) — `npm run lint` (check) / `npm run lint:fix` (write). Regole `noUnusedImports`/`noUnusedVariables` disattivate per `*.svelte`: il parser Biome non legge il markup, quindi flagga falsi positivi su import/var usati solo in template.
@@ -29,7 +67,7 @@ Flusso principale:
 
 ### `SttIndicator` — `src/lib/SttIndicator.svelte`
 
-Indicatore stato server STT + pulsante ⚙ impostazioni.
+Indicatore stato server STT + pulsante ⚙ impostazioni (icona nuda `text-brand-cream`, nessuno sfondo/forma bottone — solo `opacity` su hover).
 
 | Stato | Colore dot | Label |
 |---|---|---|
@@ -46,10 +84,14 @@ Logica:
 - Mount → `get_stt_settings` + `get_local_model_path` + `get_recordings_dir` + `listen("download-progress")`
 - Se `localReady`: mostra messaggio "Modello installato e pronto"
 - Altrimenti: mostra warning dimensioni
-- Due righe percorso (`.path-row`): "Cartella modello" e "Cartella registrazioni", ciascuna con path corrente (sola lettura) + pulsante "Cambia cartella" (`pick_directory` → salva in `settings.modelDir`/`recordingsDir`)
-  - Cambio cartella modello: chiede conferma (nessuna migrazione automatica del file ~1.5GB — l'utente dovrà riscaricare nella nuova posizione, `localReady` viene resettato a `false`)
-  - Entrambe le righe hanno "Mostra nel Finder" → `revealItemInDir` (plugin opener)
-- Pulsante "Scarica" / "Scarica di nuovo" (label cambia in base a `localReady`)
+
+Due gruppi "cartella", azioni raggruppate per pertinenza (non sparse) — bottoni outline (`border-brand-light`/`text-brand-light`) sempre in coppia `flex-1` per garantire stessa larghezza/altezza:
+- **Cartella modello**: path in riquadro `bg-brand-dark/50` con micro-label "Percorso" (`uppercase`/`tracking-wider`/`text-brand-cream/40`) sopra il path monospace — distingue il valore di sola lettura dai controlli → riga `[Cambia cartella] [Mostra nel Finder]` (mostrato appena `modelPath` è noto, anche prima del download) → progress bar (durante download) → `[Scarica / Scarica di nuovo]` (bottone pieno `bg-brand-lighter`, label cambia in base a `localReady`)
+- **Cartella registrazioni**: stesso riquadro path con label "Percorso" → riga `[Cambia cartella] [Mostra nel Finder]`
+
+Logica:
+- `pick_directory` → salva in `settings.modelDir`/`recordingsDir`; cambio cartella modello chiede conferma (nessuna migrazione automatica del file ~1.5GB — l'utente dovrà riscaricare nella nuova posizione, `localReady` viene resettato a `false`)
+- "Mostra nel Finder" → `revealItemInDir` (plugin opener). Per le registrazioni rivela `recordingsDir` (sempre creata da `get_recordings_dir`); per il modello rivela la cartella padre di `modelPath` invece del file — il file `.bin` potrebbe non esistere ancora se il modello non è stato scaricato, mentre `get_local_model_path` garantisce che la cartella esista
 - Durante download: progress bar 2 step (binary → model), label percentuale
 - Save → `save_stt_settings` → `onSaved(settings)` → chiude modal → `ensureServer()`
 

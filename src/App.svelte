@@ -102,10 +102,14 @@ function handleSettingsSaved(_s: SttSettings) {
 }
 </script>
 
-<div class="app">
-  <main class="recorder-section">
+<div class="flex h-screen flex-col items-center gap-8 overflow-y-auto px-6 pt-6 pb-18 box-border">
+  <main class="flex flex-1 flex-col items-center justify-center gap-6 text-center">
     <button
-      class={`rec-btn${isRecording ? " recording" : ""}`}
+      class={`h-30 w-30 cursor-pointer rounded-full border-none text-base font-bold text-brand-cream transition-[background,box-shadow,transform] duration-200 active:scale-[0.96] ${
+        isRecording
+          ? "animate-[pulse-rec_1.5s_ease-in-out_infinite] bg-brand-lightest shadow-[0_4px_16px_rgba(210,52,52,0.4)]"
+          : "bg-brand-lighter shadow-[0_4px_16px_rgba(171,43,41,0.4)] hover:bg-brand-lightest"
+      }`}
       onclick={handleRecord}
       aria-label={isRecording ? "Stop recording" : "Start recording"}
     >
@@ -113,16 +117,20 @@ function handleSettingsSaved(_s: SttSettings) {
     </button>
 
     {#if isRecording}
-      <p class="timer">{formatDuration(durationMs)}</p>
+      <p class="m-0 font-mono text-2xl font-semibold text-brand-lightest">
+        {formatDuration(durationMs)}
+      </p>
     {/if}
     {#if error}
-      <p class="error">{error}</p>
+      <p class="m-0 max-w-95 text-[0.85rem] text-red-400">{error}</p>
     {/if}
   </main>
 
   {#if recordings.length > 0}
-    <section class="recordings-list">
-      <h2 class="recordings-title">Registrazioni</h2>
+    <section class="flex w-full max-w-170 flex-col gap-4">
+      <h2 class="m-0 mb-1 text-xs font-semibold tracking-wider text-brand-cream/50 uppercase">
+        Registrazioni
+      </h2>
       {#each recordings as rec (rec.id)}
         <RecordingItem {rec} />
       {/each}
