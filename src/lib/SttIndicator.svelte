@@ -1,17 +1,20 @@
 <script lang="ts">
-  import type { SttStatus } from "./types";
+import type { SttStatus } from "./types";
 
-  let { status, onSettingsClick }: {
-    status: SttStatus;
-    onSettingsClick: () => void;
-  } = $props();
+let {
+  status,
+  onSettingsClick,
+}: {
+  status: SttStatus;
+  onSettingsClick: () => void;
+} = $props();
 
-  const labels: Record<SttStatus, string> = {
-    checking: "controllo...",
-    starting: "avvio server...",
-    running: "server attivo",
-    error: "server non disponibile",
-  };
+const labels: Record<SttStatus, string> = {
+  checking: "controllo...",
+  starting: "avvio server...",
+  running: "server attivo",
+  error: "server non disponibile",
+};
 </script>
 
 <div class="stt-row">

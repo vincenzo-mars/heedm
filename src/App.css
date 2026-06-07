@@ -47,7 +47,10 @@ h1 {
   font-size: 1rem;
   font-weight: 700;
   cursor: pointer;
-  transition: background 0.2s, box-shadow 0.2s, transform 0.1s;
+  transition:
+    background 0.2s,
+    box-shadow 0.2s,
+    transform 0.1s;
   box-shadow: 0 4px 16px rgba(59, 130, 246, 0.4);
 }
 
@@ -61,7 +64,8 @@ h1 {
 
 .rec-btn.recording {
   background: #ef4444;
-  box-shadow: 0 0 0 10px rgba(239, 68, 68, 0.15),
+  box-shadow:
+    0 0 0 10px rgba(239, 68, 68, 0.15),
     0 4px 16px rgba(239, 68, 68, 0.4);
   animation: pulse 1.5s ease-in-out infinite;
 }
@@ -69,11 +73,13 @@ h1 {
 @keyframes pulse {
   0%,
   100% {
-    box-shadow: 0 0 0 10px rgba(239, 68, 68, 0.15),
+    box-shadow:
+      0 0 0 10px rgba(239, 68, 68, 0.15),
       0 4px 16px rgba(239, 68, 68, 0.4);
   }
   50% {
-    box-shadow: 0 0 0 18px rgba(239, 68, 68, 0.05),
+    box-shadow:
+      0 0 0 18px rgba(239, 68, 68, 0.05),
       0 4px 16px rgba(239, 68, 68, 0.4);
   }
 }
@@ -118,12 +124,26 @@ h1 {
   flex-shrink: 0;
 }
 
-.stt-checking .stt-dot  { background: #aaa; animation: blink 1.2s ease-in-out infinite; }
-.stt-starting .stt-dot  { background: #f59e0b; animation: blink 0.8s ease-in-out infinite; }
-.stt-running  { color: #16a34a; }
-.stt-running .stt-dot   { background: #16a34a; }
-.stt-error    { color: #ef4444; }
-.stt-error .stt-dot     { background: #ef4444; }
+.stt-checking .stt-dot {
+  background: #aaa;
+  animation: blink 1.2s ease-in-out infinite;
+}
+.stt-starting .stt-dot {
+  background: #f59e0b;
+  animation: blink 0.8s ease-in-out infinite;
+}
+.stt-running {
+  color: #16a34a;
+}
+.stt-running .stt-dot {
+  background: #16a34a;
+}
+.stt-error {
+  color: #ef4444;
+}
+.stt-error .stt-dot {
+  background: #ef4444;
+}
 
 .settings-btn {
   background: none;
@@ -136,14 +156,16 @@ h1 {
   line-height: 1;
 }
 
-.settings-btn:hover { opacity: 0.8; }
+.settings-btn:hover {
+  opacity: 0.8;
+}
 
 /* ── Settings panel ── */
 
 .settings-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,0.4);
+  background: rgba(0, 0, 0, 0.4);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -158,7 +180,7 @@ h1 {
   display: flex;
   flex-direction: column;
   gap: 20px;
-  box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
 }
 
 .settings-header {
@@ -181,8 +203,9 @@ h1 {
   line-height: 1;
 }
 
-.settings-close:hover { opacity: 1; }
-
+.settings-close:hover {
+  opacity: 1;
+}
 
 .mode-content {
   display: flex;
@@ -241,9 +264,13 @@ h1 {
   transition: background 0.15s;
 }
 
-.download-btn:hover { background: #2563eb; }
-.download-btn:disabled { background: #93c5fd; cursor: not-allowed; }
-
+.download-btn:hover {
+  background: #2563eb;
+}
+.download-btn:disabled {
+  background: #93c5fd;
+  cursor: not-allowed;
+}
 
 .save-btn {
   padding: 10px;
@@ -257,16 +284,25 @@ h1 {
   transition: background 0.15s;
 }
 
-.save-btn:hover { background: #333; }
+.save-btn:hover {
+  background: #333;
+}
 
 @media (prefers-color-scheme: dark) {
   .settings-panel {
     background: #1e1e1e;
     color: #f0f0f0;
   }
-.save-btn { background: #f0f0f0; color: #0f0f0f; }
-  .save-btn:hover { background: #ccc; }
-  .dl-bar { background: #3a3a3a; }
+  .save-btn {
+    background: #f0f0f0;
+    color: #0f0f0f;
+  }
+  .save-btn:hover {
+    background: #ccc;
+  }
+  .dl-bar {
+    background: #3a3a3a;
+  }
 }
 
 /* ── Recordings list ── */
@@ -359,12 +395,22 @@ h1 {
   animation: blink 1.2s ease-in-out infinite;
 }
 
-.dots span:nth-child(2) { animation-delay: 0.2s; }
-.dots span:nth-child(3) { animation-delay: 0.4s; }
+.dots span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.dots span:nth-child(3) {
+  animation-delay: 0.4s;
+}
 
 @keyframes blink {
-  0%, 80%, 100% { opacity: 0.2; }
-  40% { opacity: 1; }
+  0%,
+  80%,
+  100% {
+    opacity: 0.2;
+  }
+  40% {
+    opacity: 1;
+  }
 }
 
 /* ── Skeleton ── */
@@ -384,8 +430,12 @@ h1 {
 }
 
 @keyframes shimmer {
-  0% { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
 }
 
 /* ── Transcript ── */

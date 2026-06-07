@@ -4,6 +4,10 @@ File: `src/App.svelte`, `src/lib/*.svelte`, `src/lib/types.ts`, `src/App.css`
 
 UI in Svelte 5 (runes: `$state`, `$derived`, `$effect`, `$props`), un componente per file sotto `src/lib/`. Tipi e helper condivisi in `src/lib/types.ts`. Nessuna libreria di state management esterna.
 
+## Lint & format
+
+Biome (`biome.json`) — `npm run lint` (check) / `npm run lint:fix` (write). Regole `noUnusedImports`/`noUnusedVariables` disattivate per `*.svelte`: il parser Biome non legge il markup, quindi flagga falsi positivi su import/var usati solo in template.
+
 ## Componenti
 
 ### `App` (root) — `src/App.svelte`

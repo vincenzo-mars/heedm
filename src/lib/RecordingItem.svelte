@@ -1,8 +1,8 @@
 <script lang="ts">
-  import type { Recording } from "./types";
-  import TranscriptView from "./TranscriptView.svelte";
+import TranscriptView from "./TranscriptView.svelte";
+import type { Recording } from "./types";
 
-  let { rec }: { rec: Recording } = $props();
+let { rec }: { rec: Recording } = $props();
 </script>
 
 <div class="recording-item">

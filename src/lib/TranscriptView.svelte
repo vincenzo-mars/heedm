@@ -1,10 +1,10 @@
 <script lang="ts">
-  import type { TranscriptResult } from "./types";
-  import { groupSegments, speakerColor, formatSeconds } from "./types";
+import type { TranscriptResult } from "./types";
+import { formatSeconds, groupSegments, speakerColor } from "./types";
 
-  let { transcript }: { transcript: TranscriptResult } = $props();
+let { transcript }: { transcript: TranscriptResult } = $props();
 
-  const groups = $derived(groupSegments(transcript.segments));
+const groups = $derived(groupSegments(transcript.segments));
 </script>
 
 <div class="transcript">

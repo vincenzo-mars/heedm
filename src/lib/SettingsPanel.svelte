@@ -1,69 +1,72 @@
 <script lang="ts">
-  import { invoke } from "@tauri-apps/api/core";
-  import { listen } from "@tauri-apps/api/event";
-  import type { DownloadProgress, SttSettings } from "./types";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import type { DownloadProgress, SttSettings } from "./types";
 
-  let { onClose, onSaved }: {
-    onClose: () => void;
-    onSaved: (s: SttSettings) => void;
-  } = $props();
+let {
+  onClose,
+  onSaved,
+}: {
+  onClose: () => void;
+  onSaved: (s: SttSettings) => void;
+} = $props();
 
-  let settings = $state<SttSettings | null>(null);
-  let downloading = $state(false);
-  let dlProgress = $state<DownloadProgress | null>(null);
-  let localReady = $state(false);
+let settings = $state<SttSettings | null>(null);
+let downloading = $state(false);
+let dlProgress = $state<DownloadProgress | null>(null);
+let localReady = $state(false);
 
-  $effect(() => {
-    invoke<SttSettings>("get_stt_settings").then((s) => {
-      settings = s;
-      localReady = s.localReady;
-    });
-
-    const unlisten = listen<DownloadProgress>("download-progress", (e) => {
-      dlProgress = e.payload;
-      if (e.payload.step === "done") {
-        downloading = false;
-        localReady = true;
-      }
-    });
-
-    return () => {
-      unlisten.then((fn) => fn());
-    };
+$effect(() => {
+  invoke<SttSettings>("get_stt_settings").then((s) => {
+    settings = s;
+    localReady = s.localReady;
   });
 
-  async function save() {
-    if (!settings) return;
-    const updated: SttSettings = {
-      ...settings,
-      localReady,
-      configured: true,
-    };
-    await invoke("save_stt_settings", { settings: updated });
-    onSaved(updated);
-    onClose();
-  }
-
-  async function startDownload() {
-    downloading = true;
-    dlProgress = null;
-    try {
-      await invoke("download_local_model");
-    } catch (e) {
+  const unlisten = listen<DownloadProgress>("download-progress", (e) => {
+    dlProgress = e.payload;
+    if (e.payload.step === "done") {
       downloading = false;
-      alert(String(e));
+      localReady = true;
     }
-  }
+  });
 
-  const dlLabel = $derived(
-    dlProgress?.step === "binary"
-      ? `Binary ${dlProgress.pct}%`
-      : dlProgress?.step === "model"
+  return () => {
+    unlisten.then((fn) => fn());
+  };
+});
+
+async function save() {
+  if (!settings) return;
+  const updated: SttSettings = {
+    ...settings,
+    localReady,
+    configured: true,
+  };
+  await invoke("save_stt_settings", { settings: updated });
+  onSaved(updated);
+  onClose();
+}
+
+async function startDownload() {
+  downloading = true;
+  dlProgress = null;
+  try {
+    await invoke("download_local_model");
+  } catch (e) {
+    downloading = false;
+    alert(String(e));
+  }
+}
+
+const dlLabel = $derived(
+  dlProgress?.step === "binary"
+    ? `Binary ${dlProgress.pct}%`
+    : dlProgress?.step === "model"
       ? `Modello ${dlProgress.pct}%`
       : dlProgress?.step === "done"
-      ? "Completato"
-      : null
-  );
+        ? "Completato"
+        : null,
+);
 </script>
 
 {#if settings}
