@@ -1,14 +1,14 @@
 # Frontend UI
 
-File: `src/App.tsx`, `src/App.css`
+File: `src/App.svelte`, `src/lib/*.svelte`, `src/lib/types.ts`, `src/App.css`
 
-Tutta la UI è in un singolo file `App.tsx`. I componenti sono function components React senza librerie di state management esterne.
+UI in Svelte 5 (runes: `$state`, `$derived`, `$effect`, `$props`), un componente per file sotto `src/lib/`. Tipi e helper condivisi in `src/lib/types.ts`. Nessuna libreria di state management esterna.
 
 ## Componenti
 
-### `App` (root)
+### `App` (root) — `src/App.svelte`
 
-State:
+State (`$state`):
 | Stato | Tipo | Descrizione |
 |---|---|---|
 | `isRecording` | `boolean` | Flag registrazione attiva |
@@ -17,14 +17,13 @@ State:
 | `recordings` | `Recording[]` | Lista registrazioni della sessione |
 | `sttStatus` | `SttStatus` | Stato server STT |
 | `showSettings` | `boolean` | Visibilità modal impostazioni |
-| `settingsRef` | `Ref<SttSettings>` | Cache settings (no re-render) |
 
 Flusso principale:
 1. Mount → `get_stt_settings` → se non configurato apre SettingsPanel → `ensureServer()`
 2. REC click → `start_recording` → polling `get_recording_status` ogni 500ms
 3. STOP click → `stop_recording` → riceve path WAV → aggiunge Recording con status `"transcribing"` → `transcribe_recording` → status `"done"` o `"error"`
 
-### `SttIndicator`
+### `SttIndicator` — `src/lib/SttIndicator.svelte`
 
 Indicatore stato server STT + pulsante ⚙ impostazioni.
 
@@ -35,7 +34,7 @@ Indicatore stato server STT + pulsante ⚙ impostazioni.
 | `running` | verde | "server attivo" |
 | `error` | rosso | "server non disponibile" |
 
-### `SettingsPanel`
+### `SettingsPanel` — `src/lib/SettingsPanel.svelte`
 
 Modal per setup e download modello Whisper.
 
@@ -46,7 +45,7 @@ Logica:
 - Durante download: progress bar 2 step (binary → model), label percentuale
 - Save → `save_stt_settings` → `onSaved(settings)` → chiude modal → `ensureServer()`
 
-### `RecordingItem`
+### `RecordingItem` — `src/lib/RecordingItem.svelte`
 
 Card per una singola registrazione.
 
@@ -56,7 +55,7 @@ Card per una singola registrazione.
 | `done` | Badge verde + `TranscriptView` |
 | `error` | Badge rosso + messaggio errore |
 
-### `TranscriptView`
+### `TranscriptView` — `src/lib/TranscriptView.svelte`
 
 Rendering trascrizione con speaker diarization.
 
@@ -65,6 +64,8 @@ Rendering trascrizione con speaker diarization.
 - Colore speaker: estratto da numero finale del nome (`SPEAKER_00` → idx 0)
 
 ## Tipi chiave
+
+Definiti in `src/lib/types.ts`.
 
 ```typescript
 interface SttSettings {

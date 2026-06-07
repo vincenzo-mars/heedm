@@ -4,9 +4,9 @@
 
 **Heedm** è un'app desktop macOS per registrare audio (microfono + sistema) e trascriverlo localmente con whisper.cpp.
 
-- Stack: Tauri v2 + React 19 + TypeScript + Vite
+- Stack: Tauri v2 + Svelte 5 + TypeScript + Vite
 - Backend: Rust (src-tauri/)
-- Frontend: React (src/)
+- Frontend: Svelte (src/)
 - Target: macOS (arm64 + x64), con supporto futuro Linux e Windows
 - STT: solo locale tramite whisper-server (whisper.cpp), porta 8080
 - Nessun Docker, nessuna dipendenza cloud
@@ -30,9 +30,15 @@ src-tauri/src/
       windows.rs                 # stub (non implementato)
 
 src/
-  main.tsx                       # entry point React
-  App.tsx                        # UI completa (tutti i componenti)
+  main.ts                        # entry point Svelte
+  App.svelte                     # componente root
   App.css                        # stili
+  lib/
+    types.ts                     # tipi e helper condivisi
+    SttIndicator.svelte          # indicatore stato server STT
+    SettingsPanel.svelte         # modal impostazioni/download modello
+    RecordingItem.svelte         # card singola registrazione
+    TranscriptView.svelte        # rendering trascrizione con speaker
 
 docs/
   architecture.md                # flusso dati end-to-end
@@ -41,7 +47,7 @@ docs/
     stt.md                       # integrazione Whisper
     commands.md                  # reference tutti i Tauri commands
   frontend/
-    ui.md                        # componenti React
+    ui.md                        # componenti Svelte
 ```
 
 ## Convenzioni
@@ -61,7 +67,7 @@ Ogni volta che modifichi o aggiungi codice, aggiorna il doc corrispondente:
 | `recorder/` (qualsiasi file) | `docs/backend/recorder.md` |
 | `commands.rs` — sezione STT | `docs/backend/stt.md` |
 | `commands.rs` — sezione recording | `docs/backend/commands.md` |
-| `src/` (React) | `docs/frontend/ui.md` |
+| `src/` (Svelte) | `docs/frontend/ui.md` |
 | flusso dati o dipendenze | `docs/architecture.md` |
 | decisione non ovvia o cambio architettura | aggiungi entry in `DEVLOG.md` |
 

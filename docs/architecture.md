@@ -38,7 +38,7 @@
                     text, segments[], speaker diarization
                            │
                            ▼
-                    [Frontend React]
+                    [Frontend Svelte]
                     TranscriptView — gruppi per speaker
 ```
 
@@ -46,7 +46,7 @@
 
 | Layer | Tecnologia | Ruolo |
 |---|---|---|
-| Frontend | React 19 + TypeScript | UI, state, comunicazione con backend via `invoke` |
+| Frontend | Svelte 5 + TypeScript | UI, state, comunicazione con backend via `invoke` |
 | IPC | Tauri v2 commands | Bridge frontend↔backend, type-safe |
 | Backend | Rust async (tokio) | Registrazione, download, gestione server STT |
 | Audio capture | cpal | Microfono cross-platform |
