@@ -1,0 +1,7 @@
+[env]
+MACOSX_DEPLOYMENT_TARGET = "13.0"
+
+[target.aarch64-apple-darwin]
+rustflags = [
+  "-L", "/Library/Developer/CommandLineTools/usr/lib/swift/macosx",
+]
