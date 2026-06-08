@@ -199,6 +199,16 @@ pub async fn download_local_model(app: AppHandle) -> Result<(), String> {
 
 // ── Server management ─────────────────────────────────────────────────────────
 
+/// Tiene l'handle del processo whisper-server per poterlo terminare
+/// alla chiusura dell'app (altrimenti resta in background dopo il quit).
+pub struct WhisperServerState(pub std::sync::Mutex<Option<tokio::process::Child>>);
+
+impl WhisperServerState {
+    pub fn new() -> Self {
+        Self(std::sync::Mutex::new(None))
+    }
+}
+
 #[tauri::command]
 pub async fn start_local_server(app: AppHandle) -> Result<(), String> {
     if tokio::net::TcpStream::connect(format!("127.0.0.1:{LOCAL_PORT}"))
@@ -216,7 +226,7 @@ pub async fn start_local_server(app: AppHandle) -> Result<(), String> {
         return Err("Modello locale non scaricato".to_string());
     }
 
-    tokio::process::Command::new(&bin)
+    let child = tokio::process::Command::new(&bin)
         .args([
             "--model",
             model.to_str().unwrap(),
@@ -227,6 +237,8 @@ pub async fn start_local_server(app: AppHandle) -> Result<(), String> {
         ])
         .spawn()
         .map_err(|e| e.to_string())?;
+
+    *app.state::<WhisperServerState>().0.lock().unwrap() = Some(child);
 
     for _ in 0..60 {
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;

@@ -113,8 +113,12 @@ Gli eventi sono `"download-progress"` con payload `{ step: "model"|"done", pct: 
 
 1. Verifica se porta 8080 è già in ascolto → se sì, esce subito
 2. Risolve il binario bundled (`bundled_bin_path`) e controlla che il modello esista
-3. Spawna processo: `whisper-server --model <path> --host 127.0.0.1 --port 8080`
+3. Spawna processo: `whisper-server --model <path> --host 127.0.0.1 --port 8080`, l'handle `Child` viene salvato in `WhisperServerState` (state Tauri gestita)
 4. Polling TCP ogni 1s per 60s max → `Err` se non risponde
+
+### Terminazione alla chiusura dell'app
+
+`WhisperServerState` (`commands.rs`) tiene l'unico handle al processo `whisper-server`. In `lib.rs`, l'app viene costruita con `.build()` invece di `.run()` diretto, e il loop eventi gestisce `RunEvent::ExitRequested`: estrae il `Child` dallo state e chiama `start_kill()`, così il processo non resta orfano in background dopo il quit.
 
 ## Trascrizione (`transcribe_recording`)
 

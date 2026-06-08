@@ -13,6 +13,23 @@ Formato:
 
 ---
 
+## 2026-06-08 18-35 — Termina whisper-server alla chiusura dell'app
+
+**Obiettivo:** `whisper-server` restava in background (processo orfano) dopo il quit di Heedm, perché veniva spawnato senza tenerne l'handle.
+
+**Fatto:**
+- `commands.rs`: nuovo `WhisperServerState(Mutex<Option<tokio::process::Child>>)`, gestito come state Tauri; `start_local_server` ora salva l'handle del `Child` appena spawnato
+- `lib.rs`: la build dell'app passa da `.run()` diretto a `.build()` + `app.run(...)` con gestione di `RunEvent::ExitRequested` — estrae il `Child` dallo state e chiama `start_kill()` (kill non bloccante, va bene in handler sincrono)
+- Doc: `docs/backend/stt.md` — sezione "Terminazione alla chiusura dell'app"
+
+**Decisioni:**
+- `start_kill()` invece di `kill().await`: l'handler di `RunEvent` è sincrono, `start_kill` invia il segnale senza bisogno di un runtime async
+- Gestito solo `ExitRequested` (non anche `Exit`): copre quit standard (Cmd+Q / menu Quit); un eventuale orfano residuo da crash/force-quit andrebbe gestito separatamente (es. check porta 8080 all'avvio)
+
+**Prossimi passi:** —
+
+---
+
 ## 2026-06-08 — Cartella registrazioni default: da ~/Music a ~/Documents
 
 **Obiettivo:** spostare la cartella default delle registrazioni da `~/Music/Heedm/Records/` a `~/Documents/Heedm/Records/`.

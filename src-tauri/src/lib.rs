@@ -3,13 +3,15 @@ mod permissions;
 mod recorder;
 
 use recorder::RecorderState;
+use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(RecorderState::new())
+        .manage(commands::WhisperServerState::new())
         .invoke_handler(tauri::generate_handler![
             commands::start_recording,
             commands::stop_recording,
@@ -29,6 +31,20 @@ pub fn run() {
             commands::request_screen_recording_permission,
             commands::open_permission_settings,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|app_handle, event| {
+        if let tauri::RunEvent::ExitRequested { .. } = event {
+            if let Some(mut child) = app_handle
+                .state::<commands::WhisperServerState>()
+                .0
+                .lock()
+                .unwrap()
+                .take()
+            {
+                let _ = child.start_kill();
+            }
+        }
+    });
 }
