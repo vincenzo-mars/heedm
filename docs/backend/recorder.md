@@ -87,8 +87,8 @@ se presente e lo usa per popolare `TranscriptSegment.speaker`.
 ## Writer (`writer.rs`)
 
 ### `write_wav(samples: &[f32], path: &Path, sample_rate: u32, channels: u16) -> Result<(), String>`
-Scrive un file WAV in formato `Float32` usando `hound::WavWriter`.
-Spec WAV output: `{ bits_per_sample: 32, sample_format: Float, channels, sample_rate }`.
+Scrive un file WAV in formato `Int16 PCM` usando `hound::WavWriter` (converte ogni sample `f32` con clamp `[-1.0, 1.0]` poi scala per `i16::MAX`).
+Spec WAV output: `{ bits_per_sample: 16, sample_format: Int, channels, sample_rate }`.
 
 ---
 

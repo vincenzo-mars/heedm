@@ -4,12 +4,59 @@ Journal condiviso di implementazione. Ogni sessione aggiunge un'entry in cima.
 
 Formato:
 ```
-## YYYY-MM-DD — <titolo>
+## YYYY-MM-DD hh-mm — <titolo>
 **Obiettivo:** ...
 **Fatto:** ...
 **Decisioni:** ...
 **Prossimi passi:** ...
 ```
+
+---
+
+## 2026-06-08 — Implementata opzione 1: WAV registrati ora 16-bit PCM (era Float32)
+
+**Obiettivo:** chiudere l'analisi dell'entry sotto — applicare l'opzione raccomandata (16-bit PCM) per dimezzare la dimensione delle registrazioni (~10MB/min → ~5MB/min).
+
+**Fatto:**
+- `recorder/writer.rs::write_wav`: spec output `{ bits_per_sample: 16, sample_format: Int }` (era `{ 32, Float }`); ogni sample `f32` convertito con clamp `[-1.0, 1.0]` poi scala per `i16::MAX` — stessa conversione già usata in `prepare_for_whisper` (`commands.rs`)
+- Doc aggiornati: `docs/backend/recorder.md` (spec `write_wav`), `docs/backend/stt.md` (rimosso riferimento a "float32"/"piena qualità" come motivazione — ora 16-bit è il formato salvato), `docs/architecture.md` (diagramma: "WAV Float32" → "WAV Int16 PCM"), commento in `commands.rs::prepare_for_whisper`
+
+**Decisioni:**
+- Nessuna migrazione per i WAV float32 esistenti su disco — restano leggibili (`prepare_for_whisper` già gestisce sia `Float` che `Int` in lettura), semplicemente più pesanti delle nuove registrazioni
+- Bit-depth 16 è lo stesso identico formato che `prepare_for_whisper` produce comunque per l'invio a whisper-server — nessuna perdita percepibile aggiuntiva rispetto alla pipeline STT già in uso
+
+---
+
+## 2026-06-08 — Analisi: ridurre dimensione file WAV registrati
+
+**Obiettivo:** un minuto di registrazione pesa ~10MB (mono Float32 a sample rate
+nativo del mic, es. 48kHz: `48000 × 4 byte × 60s ≈ 11.5MB`, vedi
+`recorder/writer.rs`). Valutare come ridurlo prima di archiviare grandi volumi
+di registrazioni.
+
+**Opzioni valutate:**
+1. **16-bit PCM invece di Float32** — dimezza la size (~5MB/min). `hound`
+   supporta `Int`/16-bit nativamente, modifica isolata a `write_wav`. Perdita
+   di precisione bit-depth impercettibile su voce — `prepare_for_whisper`
+   converte comunque tutto a 16-bit prima dell'invio (vedi `stt.md:152`).
+   **Zero dipendenze nuove.**
+2. **Sample rate più basso in registrazione (es. 16kHz)** — taglio fino a 1/3,
+   coincide col rate target di whisper (eliminerebbe pure il resampling in
+   `prepare_for_whisper`). Tradeoff: contraddice la scelta attuale e
+   *documentata* di salvare "a piena qualità... per preservare l'archivio
+   dell'utente" (`stt.md:152`) — è un cambio architetturale, non solo
+   un'ottimizzazione, perché degrada permanentemente l'archivio.
+3. **Compressione lossless (FLAC)** — riduce ~50-60% senza perdita, ma
+   introduce una dipendenza Cargo esterna, contro il principio "niente
+   toolchain esterni" già adottato per whisper-server (niente ffmpeg, niente
+   crate di resampling).
+
+**Raccomandazione:** opzione 1 (16-bit PCM) — guadagno consistente, nessuna
+nuova dipendenza, nessuna perdita percepibile, coerente con la pipeline STT
+che già normalizza a 16-bit.
+
+**Decisione:** non ancora presa — entry di analisi, in attesa di conferma
+prima di toccare `writer.rs`.
 
 ---
 

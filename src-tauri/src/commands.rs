@@ -303,8 +303,8 @@ pub struct TranscriptResult {
 const WHISPER_SAMPLE_RATE: u32 = 16_000;
 
 /// whisper.cpp's `read_wav` accetta solo mono 16kHz 16-bit PCM (`common.cpp`).
-/// Le registrazioni sono salvate a piena qualità (rate nativo del mic, float32) per
-/// preservare l'archivio utente — la conversione avviene qui, solo in memoria, per
+/// Le registrazioni sono salvate a rate nativo del mic, 16-bit PCM (vedi `writer.rs`) —
+/// formato comunque diverso da quello richiesto dal server, conversione qui in memoria, per
 /// la richiesta di trascrizione.
 fn prepare_for_whisper(wav_bytes: &[u8]) -> Result<Vec<u8>, String> {
     let mut reader = hound::WavReader::new(Cursor::new(wav_bytes)).map_err(|e| e.to_string())?;

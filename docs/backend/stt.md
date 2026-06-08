@@ -149,7 +149,7 @@ Dopo aver ricevuto `TranscriptResult`, `transcribe_recording`:
 
 ### Conversione audio in memoria (`prepare_for_whisper`)
 
-`whisper.cpp`'s `read_wav` (`common.cpp`) accetta **solo** WAV mono, 16kHz, 16-bit PCM — qualsiasi altro formato → `{"error":"failed to read WAV file"}`. Le registrazioni sono salvate a piena qualità (rate nativo del microfono via cpal — dinamico, dipende dall'hardware, es. 44100/48000 Hz —, float32, vedi `recorder/writer.rs`), per preservare l'archivio dell'utente.
+`whisper.cpp`'s `read_wav` (`common.cpp`) accetta **solo** WAV mono, 16kHz, 16-bit PCM — qualsiasi altro formato → `{"error":"failed to read WAV file"}`. Le registrazioni sono salvate a rate nativo del microfono via cpal (dinamico, dipende dall'hardware, es. 44100/48000 Hz), 16-bit PCM (vedi `recorder/writer.rs`) — qualità "trasparente" per voce/ASR, a metà dimensione di un Float32 equivalente.
 
 `prepare_for_whisper` (`commands.rs`) converte **solo in memoria**, al momento dell'invio, senza toccare il file salvato:
 1. Legge il WAV con `hound::WavReader`, normalizza i sample a `f32` (gestisce sia `Float` che `Int`)

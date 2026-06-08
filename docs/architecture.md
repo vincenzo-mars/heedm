@@ -23,7 +23,7 @@
                 │             │               │
                 ▼             │               ▼
        [writer::write_wav()] │      [<nome>.diarization.json]
-       WAV Float32           │      sidecar accanto al WAV
+       WAV Int16 PCM         │      sidecar accanto al WAV
        sample_rate/channels  │      (solo se audio sistema attivo,
                 │            │       best-effort — non blocca la REC)
                 ▼            │               │

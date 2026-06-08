@@ -10,12 +10,13 @@ pub fn write_wav(
     let spec = WavSpec {
         channels,
         sample_rate,
-        bits_per_sample: 32,
-        sample_format: SampleFormat::Float,
+        bits_per_sample: 16,
+        sample_format: SampleFormat::Int,
     };
     let mut writer = WavWriter::create(path, spec).map_err(|e| e.to_string())?;
     for &s in samples {
-        writer.write_sample(s).map_err(|e| e.to_string())?;
+        let v = (s.clamp(-1.0, 1.0) * i16::MAX as f32) as i16;
+        writer.write_sample(v).map_err(|e| e.to_string())?;
     }
     writer.finalize().map_err(|e| e.to_string())
 }
