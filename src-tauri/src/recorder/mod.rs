@@ -17,7 +17,14 @@ pub struct RecorderInner {
     pub sys_samples: Arc<Mutex<Vec<f32>>>,
     pub mic_stream: Option<cpal::Stream>,
     pub sys_capture: Option<Box<dyn SysAudioStop>>,
+    /// Rate di *output* della registrazione (fisso, = `TARGET_SAMPLE_RATE`):
+    /// usato da mixer/diarizzazione/writer. Il microfono cattura al suo rate
+    /// nativo (`mic_native_rate`) e viene ricampionato a questo in `stop_recording`.
     pub sample_rate: u32,
+    /// Rate nativo del device microfono al momento della cattura (cpal,
+    /// dinamico — dipende dall'hardware). Serve solo per ricampionare il
+    /// buffer mic verso `sample_rate` a fine registrazione.
+    pub mic_native_rate: u32,
     pub channels: u16,
 }
 
@@ -30,7 +37,8 @@ impl RecorderInner {
             sys_samples: Arc::new(Mutex::new(Vec::new())),
             mic_stream: None,
             sys_capture: None,
-            sample_rate: 48_000,
+            sample_rate: 16_000,
+            mic_native_rate: 48_000,
             channels: 2,
         }
     }

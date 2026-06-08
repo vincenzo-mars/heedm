@@ -149,12 +149,14 @@ Dopo aver ricevuto `TranscriptResult`, `transcribe_recording`:
 
 ### Conversione audio in memoria (`prepare_for_whisper`)
 
-`whisper.cpp`'s `read_wav` (`common.cpp`) accetta **solo** WAV mono, 16kHz, 16-bit PCM — qualsiasi altro formato → `{"error":"failed to read WAV file"}`. Le registrazioni sono salvate a rate nativo del microfono via cpal (dinamico, dipende dall'hardware, es. 44100/48000 Hz), 16-bit PCM (vedi `recorder/writer.rs`) — qualità "trasparente" per voce/ASR, a metà dimensione di un Float32 equivalente.
+`whisper.cpp`'s `read_wav` (`common.cpp`) accetta **solo** WAV mono, 16kHz, 16-bit PCM — qualsiasi altro formato → `{"error":"failed to read WAV file"}`. Dalla registrazione a `TARGET_SAMPLE_RATE` (vedi `recorder.md` — `stop_recording` ricampiona il mic e scrive a 16kHz fisso, `recorder/writer.rs`), le **nuove** registrazioni sono già in questo identico formato: `prepare_for_whisper` diventa per loro un passthrough quasi a costo zero. Resta necessaria per:
+- registrazioni **legacy** (pre-cambio sample-rate), salvate al rate nativo del microfono via cpal (dinamico, es. 44100/48000 Hz)
+- buffer stereo/multi-canale (downmix a mono)
 
 `prepare_for_whisper` (`commands.rs`) converte **solo in memoria**, al momento dell'invio, senza toccare il file salvato:
 1. Legge il WAV con `hound::WavReader`, normalizza i sample a `f32` (gestisce sia `Float` che `Int`)
 2. Downmix a mono (media dei canali, se stereo)
-3. Resample al rate target (16kHz) via interpolazione lineare — rate arbitrario in ingresso, non un rapporto fisso (44100→16000 non è un intero)
+3. Resample al rate target (`TARGET_SAMPLE_RATE` = 16kHz) via `resample_linear` — interpolazione lineare condivisa con `stop_recording` (early-return passthrough se il rate è già quello giusto), gestisce rate arbitrario in ingresso, non un rapporto fisso (44100→16000 non è un intero)
 4. Converte `f32` → `i16` (clamp + scala per `i16::MAX`)
 5. Ri-codifica come WAV 16-bit PCM mono in un buffer `Cursor<Vec<u8>>` via `hound::WavWriter`, inviato come bytes multipart
 

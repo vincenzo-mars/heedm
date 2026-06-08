@@ -23,7 +23,8 @@ Stato interno della registrazione. Tenuto sotto `tokio::sync::Mutex`.
 | `sys_samples` | `Arc<Mutex<Vec<f32>>>` | Buffer campioni audio sistema |
 | `mic_stream` | `Option<cpal::Stream>` | Stream cpal attivo |
 | `sys_capture` | `Option<Box<dyn SysAudioStop>>` | Handle cattura sistema |
-| `sample_rate` | `u32` | Sample rate del microfono (default 48000) |
+| `sample_rate` | `u32` | Rate di **output** della registrazione — fisso, = `TARGET_SAMPLE_RATE` (16000, lo stesso richiesto da whisper). Usato da mixer/diarizzazione/writer |
+| `mic_native_rate` | `u32` | Rate **nativo** del device microfono al momento della cattura (cpal, dinamico, dipende dall'hardware). Serve solo per ricampionare il buffer mic verso `sample_rate` a fine registrazione |
 | `channels` | `u16` | Canali del microfono (default 2) |
 
 ### `RecorderState`
@@ -39,6 +40,10 @@ Wrapper Tauri-managed: `pub struct RecorderState(pub tokio::sync::Mutex<Recorder
 - Accumula campioni in `buf` via callback stream
 - Restituisce `MicInfo { stream, sample_rate, channels }`
 
+Il `sample_rate` restituito è quello **nativo** del device (cpal non garantisce
+di poter forzare un rate arbitrario in cattura) — salvato in `mic_native_rate` e
+ricampionato a `TARGET_SAMPLE_RATE` in `stop_recording` (vedi sezione Mixer).
+
 Il `Stream` va tenuto vivo in `RecorderInner::mic_stream` — dropparlo ferma la cattura.
 
 ---
@@ -49,6 +54,15 @@ Il `Stream` va tenuto vivo in `RecorderInner::mic_stream` — dropparlo ferma la
 Somma i due buffer sample-by-sample fino al più lungo (il più corto viene
 considerato silenzio/zero-padded oltre la propria lunghezza).
 Clamp a `[-1.0, 1.0]` per prevenire clipping.
+
+Richiede che `mic`/`sys` siano già allo **stesso rate** (`sample_rate`,
+`TARGET_SAMPLE_RATE`): `stop_recording` (`commands.rs`) ricampiona il buffer mic
+dal suo rate nativo (`mic_native_rate`) a `sample_rate` con `resample_linear`
+(interpolazione lineare pura-Rust, stessa logica condivisa con
+`prepare_for_whisper`, vedi [`docs/backend/stt.md`](stt.md)) **prima** di
+chiamare `mix`/`estimate_timeline`. L'audio di sistema arriva già al rate
+giusto — su macOS, `SCStream` lo cattura nativamente a `TARGET_SAMPLE_RATE`
+(nessun resample necessario lato nostro).
 
 ---
 
@@ -97,7 +111,7 @@ Spec WAV output: `{ bits_per_sample: 16, sample_format: Int, channels, sample_ra
 ### macOS (`system_audio/macos.rs`)
 - Usa `ScreenCaptureKit` via crate `screencapturekit`
 - Crea uno `SCStream` sul display primario con `SCContentFilter::display_excluding_windows([])`
-- Configura stream: `sample_rate` e `channels` ereditati dal microfono, `excludes_current_process_audio: false`
+- Configura stream: `sample_rate` = `TARGET_SAMPLE_RATE` (16kHz fisso, passato da `start_recording` — `SCStream` lo converte nativamente, zero resampling lato nostro), `channels` ereditato dal microfono, `excludes_current_process_audio: false`
 - `AudioHandler` implementa `SCStreamOutputTrait`: estrae campioni F32 da `CMSampleBuffer`, accumula in buffer
 - `stop()` chiama `SCStream::stop_capture()`
 

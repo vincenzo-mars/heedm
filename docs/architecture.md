@@ -9,13 +9,20 @@
 ```
 [Microfono]         [Audio sistema]
     │                     │
-    │ cpal input           │ ScreenCaptureKit (macOS)
-    │                     │ PipeWire monitor (Linux)
+    │ cpal input           │ ScreenCaptureKit (macOS) — cattura già a
+    │ rate nativo device   │ TARGET_SAMPLE_RATE (16kHz, conversione nativa OS)
+    │ (mic_native_rate)    │ PipeWire monitor (Linux)
     ▼                     ▼
 [mic_samples: Arc<Mutex<Vec<f32>>>]   [sys_samples: Arc<Mutex<Vec<f32>>>]
                 │                              │
-                ├──────────────┬───────────────┤   (buffer grezzi, separati — usati
-                │              │               │    due volte prima di essere fusi)
+                ▼                              │
+       [resample_linear()]                    │   (solo mic: cpal non forza un
+       mic_native_rate → TARGET_SAMPLE_RATE   │    rate di cattura arbitrario;
+       (interpolazione lineare, condivisa     │    sys arriva già al rate giusto)
+       con prepare_for_whisper)               │
+                │                              │
+                ├──────────────┬───────────────┤   (buffer ora allo stesso rate —
+                │              │               │    usati due volte prima di essere fusi)
                 ▼              │               ▼
        [mixer::mix()]         │      [diarization::estimate_timeline()]
        somma sample-by-sample │      energia RMS mic vs sistema a finestre
@@ -24,7 +31,7 @@
                 ▼             │               ▼
        [writer::write_wav()] │      [<nome>.diarization.json]
        WAV Int16 PCM         │      sidecar accanto al WAV
-       sample_rate/channels  │      (solo se audio sistema attivo,
+       16kHz fisso/channels  │      (solo se audio sistema attivo,
                 │            │       best-effort — non blocca la REC)
                 ▼            │               │
        [file .wav su disco] ─┘               │
@@ -34,7 +41,9 @@
    multipart POST /inference                 │
    language: it, response_format:            │
    verbose_json (prepare_for_whisper         │
-   converte in memoria a 16kHz/mono)         │
+   converte in memoria — passthrough per     │
+   nuove REC già a 16kHz, resample solo per  │
+   file legacy/stereo)                       │
                 │                            │
                 ▼                            │
    [whisper-server locale]                   │

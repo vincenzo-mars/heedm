@@ -13,6 +13,26 @@ Formato:
 
 ---
 
+## 2026-06-08 — Implementata opzione 2: registrazioni a 16kHz fisso (era rate nativo del mic)
+
+**Obiettivo:** completare la riduzione dimensione WAV avviata con l'entry sotto (16-bit PCM) — applicare anche l'opzione 2 dell'analisi originale, abbassando il sample rate di registrazione a 16kHz fisso (lo stesso richiesto da whisper). Ulteriore ~3× di riduzione (16-bit@48kHz ≈ 5.6MB/min → 16-bit@16kHz ≈ 1.83MB/min — combinato ~6× rispetto all'originale Float32@48kHz ~11.5MB/min).
+
+**Fatto:**
+- `commands.rs`: `WHISPER_SAMPLE_RATE` rinominata `TARGET_SAMPLE_RATE` — ora rate condiviso tra registrazione e trascrizione (stesso valore, stesso significato: registrare già al rate richiesto da whisper elimina il resampling per le nuove REC)
+- Estratta `resample_linear(samples, from_rate, to_rate)`: la logica di interpolazione lineare già scritta dentro `prepare_for_whisper` (gestisce rate arbitrari/rapporti non interi, es. 44100→16000), ora condivisa fra trascrizione e registrazione, con early-return passthrough se `from_rate == to_rate`
+- `start_recording`: l'audio di sistema viene catturato passando `TARGET_SAMPLE_RATE` invece di `mic_info.sample_rate` — su macOS `SCStream::with_sample_rate` lo converte **nativamente** a 16kHz (zero codice nostro). Il rate nativo del mic viene salvato a parte in `RecorderInner::mic_native_rate` (nuovo campo)
+- `stop_recording`: il buffer mic (unico a non arrivare già a 16kHz — cpal non garantisce di poter forzare il rate di cattura) viene ricampionato con `resample_linear(mic_native_rate → TARGET_SAMPLE_RATE)` **prima** di `estimate_timeline`/`mixer::mix` — entrambi richiedono buffer allo stesso rate. `RecorderInner::sample_rate` ora rappresenta il rate di *output* (fisso), non più quello (variabile) del mic
+- Doc aggiornati: `docs/backend/recorder.md` (campo `mic_native_rate`, sezione mixer/resample, sys audio macOS), `docs/backend/stt.md` (sezione `prepare_for_whisper` — passthrough per nuove REC, `resample_linear` condivisa), `docs/architecture.md` (diagramma con step di resample mic)
+
+**Decisioni:**
+- **Resample solo del buffer mic, non dell'audio di sistema**: ScreenCaptureKit converte nativamente al rate richiesto in cattura (`with_sample_rate`) — sys arriva già a 16kHz senza alcun lavoro nostro. cpal invece non garantisce di poter forzare un rate arbitrario sulla maggior parte dei microfoni — l'unica via è catturare al rate nativo e ricampionare dopo
+- **Costante condivisa `TARGET_SAMPLE_RATE` invece di due costanti uguali**: evita il rischio di drift (una cambiata, l'altra no) e documenta esplicitamente che la scelta del rate di registrazione *è* la scelta del rate richiesto da whisper — non sono due esigenze in conflitto da bilanciare, sono la stessa cosa
+- **Nessuna migrazione per registrazioni esistenti**: restano al loro rate nativo originale (es. 48kHz) — `prepare_for_whisper` le gestisce comunque tramite lo stesso `resample_linear` (percorso "legacy", non passthrough)
+- **Tradeoff qualità accettato esplicitamente dall'utente**: rompe la promessa "salva a piena qualità" (vedi entry "Diarizzazione reale" sotto, e l'analisi originale che classificava questa opzione come "cambio architetturale, non solo ottimizzazione"). Perdita reale ma contenuta: 16kHz = qualità "voce HD telefonica" (Nyquist 8kHz), trasparente per il parlato, percepibile solo su contenuti non-vocali (musica, rumori acuti)
+- **Latent mismatch preesistente non toccato**: `system_audio/linux.rs` ignora il parametro `sample_rate` passato (usa il rate nativo del device "monitor") — bug preesistente (già presente prima di questo cambio, quando il rate passato era quello nativo del mic), non aggravato qui, fuori scope: Linux è target futuro, non ancora supportato attivamente
+
+---
+
 ## 2026-06-08 — Implementata opzione 1: WAV registrati ora 16-bit PCM (era Float32)
 
 **Obiettivo:** chiudere l'analisi dell'entry sotto — applicare l'opzione raccomandata (16-bit PCM) per dimezzare la dimensione delle registrazioni (~10MB/min → ~5MB/min).

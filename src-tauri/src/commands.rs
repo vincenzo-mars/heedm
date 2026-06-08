@@ -300,12 +300,40 @@ pub struct TranscriptResult {
     pub segments: Vec<TranscriptSegment>,
 }
 
-const WHISPER_SAMPLE_RATE: u32 = 16_000;
+/// Rate unico per registrazione *e* trascrizione: whisper.cpp richiede 16kHz
+/// (`read_wav` in `common.cpp`), e registrare direttamente a questo rate
+/// (vedi `start_recording`/`stop_recording`) elimina anche il resampling qui
+/// sotto per le nuove registrazioni — non è una coincidenza, è la scelta che
+/// rende le due esigenze (size su disco, formato richiesto dal server) la
+/// stessa cosa.
+const TARGET_SAMPLE_RATE: u32 = 16_000;
+
+/// Resample lineare puro-Rust: gestisce rate arbitrari in ingresso, inclusi
+/// rapporti non interi (es. 44100 -> 16000). ~15 righe, zero dipendenze esterne
+/// (niente `rubato`/`ffmpeg`) — sufficiente per parlato/ASR, non per audio
+/// musicale ad alta fedeltà.
+fn resample_linear(samples: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
+    if from_rate == to_rate {
+        return samples.to_vec();
+    }
+    let ratio = from_rate as f64 / to_rate as f64;
+    let out_len = (samples.len() as f64 / ratio).round() as usize;
+    let mut out = Vec::with_capacity(out_len);
+    for i in 0..out_len {
+        let pos = i as f64 * ratio;
+        let idx = pos.floor() as usize;
+        let frac = (pos - idx as f64) as f32;
+        let a = samples.get(idx).copied().unwrap_or(0.0);
+        let b = samples.get(idx + 1).copied().unwrap_or(a);
+        out.push(a + (b - a) * frac);
+    }
+    out
+}
 
 /// whisper.cpp's `read_wav` accetta solo mono 16kHz 16-bit PCM (`common.cpp`).
-/// Le registrazioni sono salvate a rate nativo del mic, 16-bit PCM (vedi `writer.rs`) —
-/// formato comunque diverso da quello richiesto dal server, conversione qui in memoria, per
-/// la richiesta di trascrizione.
+/// Le registrazioni sono ora salvate direttamente a `TARGET_SAMPLE_RATE` (vedi
+/// `stop_recording`) — per i nuovi file questa conversione è un passthrough;
+/// resta necessaria solo per registrazioni legacy a rate nativo del mic.
 fn prepare_for_whisper(wav_bytes: &[u8]) -> Result<Vec<u8>, String> {
     let mut reader = hound::WavReader::new(Cursor::new(wav_bytes)).map_err(|e| e.to_string())?;
     let spec = reader.spec();
@@ -335,26 +363,11 @@ fn prepare_for_whisper(wav_bytes: &[u8]) -> Result<Vec<u8>, String> {
             .collect()
     };
 
-    let resampled = if spec.sample_rate == WHISPER_SAMPLE_RATE {
-        mono
-    } else {
-        let ratio = spec.sample_rate as f64 / WHISPER_SAMPLE_RATE as f64;
-        let out_len = (mono.len() as f64 / ratio).round() as usize;
-        let mut out = Vec::with_capacity(out_len);
-        for i in 0..out_len {
-            let pos = i as f64 * ratio;
-            let idx = pos.floor() as usize;
-            let frac = (pos - idx as f64) as f32;
-            let a = mono.get(idx).copied().unwrap_or(0.0);
-            let b = mono.get(idx + 1).copied().unwrap_or(a);
-            out.push(a + (b - a) * frac);
-        }
-        out
-    };
+    let resampled = resample_linear(&mono, spec.sample_rate, TARGET_SAMPLE_RATE);
 
     let out_spec = hound::WavSpec {
         channels: 1,
-        sample_rate: WHISPER_SAMPLE_RATE,
+        sample_rate: TARGET_SAMPLE_RATE,
         bits_per_sample: 16,
         sample_format: hound::SampleFormat::Int,
     };
@@ -458,7 +471,9 @@ pub async fn start_recording(state: State<'_, RecorderState>) -> Result<(), Stri
     sys_buf.lock().unwrap().clear();
 
     let mic_info = mic::start_mic_capture(mic_buf)?;
-    let sys_capture = match system_audio::start(sys_buf, mic_info.sample_rate, mic_info.channels) {
+    // SCStream (macOS) converte nativamente al rate richiesto — catturare l'audio
+    // di sistema già a TARGET_SAMPLE_RATE evita di doverlo ricampionare a valle.
+    let sys_capture = match system_audio::start(sys_buf, TARGET_SAMPLE_RATE, mic_info.channels) {
         Ok(capture) => Some(capture),
         Err(e) => {
             eprintln!("Cattura audio di sistema non disponibile: {e}");
@@ -466,7 +481,8 @@ pub async fn start_recording(state: State<'_, RecorderState>) -> Result<(), Stri
         }
     };
 
-    inner.sample_rate = mic_info.sample_rate;
+    inner.sample_rate = TARGET_SAMPLE_RATE;
+    inner.mic_native_rate = mic_info.sample_rate;
     inner.channels = mic_info.channels;
     inner.mic_stream = Some(mic_info.stream);
     inner.sys_capture = sys_capture;
@@ -495,10 +511,16 @@ pub async fn stop_recording(
         inner.is_recording = false;
         inner.start_time = None;
 
-        let mic = inner.mic_samples.lock().unwrap().clone();
+        let mic_raw = inner.mic_samples.lock().unwrap().clone();
         let sys = inner.sys_samples.lock().unwrap().clone();
         let sr = inner.sample_rate;
         let ch = inner.channels;
+
+        // Il mic cattura al rate nativo del device (cpal non lo forza); l'audio
+        // di sistema arriva già a `sr` (SCStream lo converte nativamente, vedi
+        // start_recording). Riallineiamo il mic a `sr` prima di mixer/diarizzazione
+        // — entrambi richiedono buffer allo stesso rate.
+        let mic = resample_linear(&mic_raw, inner.mic_native_rate, sr);
 
         // Solo se è stato catturato anche audio di sistema ha senso stimare un
         // timeline mic-vs-sistema: senza una seconda sorgente sarebbe sempre "mic".
