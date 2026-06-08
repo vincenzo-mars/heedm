@@ -1,4 +1,5 @@
 <script lang="ts">
+import { Folder, Mic, MonitorCheck, MonitorX, X } from "@lucide/svelte";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
@@ -75,39 +76,8 @@ async function refreshScreenRecordingStatus() {
   );
 }
 
-async function requestScreenRecording() {
-  await invoke<boolean>("request_screen_recording_permission");
-  await refreshScreenRecordingStatus();
-}
-
 function openPermissionSettings(pane: "microphone" | "screen-recording") {
   invoke("open_permission_settings", { pane });
-}
-
-async function changeModelDir() {
-  if (!settings) return;
-  const dir = await invoke<string | null>("pick_directory");
-  if (!dir) return;
-  if (
-    !confirm(
-      "Cambiando cartella dovrai riscaricare il modello nella nuova posizione. Continuare?",
-    )
-  ) {
-    return;
-  }
-  settings = { ...settings, modelDir: dir, localReady: false };
-  localReady = false;
-  await invoke("save_stt_settings", { settings });
-  modelPath = await invoke<string>("get_local_model_path");
-}
-
-async function changeRecordingsDir() {
-  if (!settings) return;
-  const dir = await invoke<string | null>("pick_directory");
-  if (!dir) return;
-  settings = { ...settings, recordingsDir: dir };
-  await invoke("save_stt_settings", { settings });
-  recordingsDir = dir;
 }
 
 async function startDownload() {
@@ -117,7 +87,7 @@ async function startDownload() {
     await invoke("download_local_model");
   } catch (e) {
     downloading = false;
-    alert(String(e));
+    throw e;
   }
 }
 
@@ -144,80 +114,107 @@ const dlLabel = $derived(
       <div class="flex items-center justify-between">
         <span class="text-base font-bold">Impostazioni</span>
         <button
-          class="text-base leading-none text-brand-cream opacity-40 transition-opacity hover:opacity-100"
-          onclick={onClose}>✕</button
+          class="text-base leading-none text-brand-cream opacity-40 transition-opacity hover:opacity-100 cursor-pointer"
+          onclick={onClose}><X size={20} /></button
         >
       </div>
 
       <div class="flex min-h-0 flex-col gap-4 overflow-y-auto pr-1">
         <div class="flex flex-col gap-3">
-          <span class="text-[0.78rem] font-semibold text-brand-cream">Permessi</span>
+          <span class="text-[0.78rem] font-semibold text-brand-cream"
+            >Permessi</span
+          >
 
-          <div class="flex flex-col gap-1.5 rounded-lg border border-brand-cream/10 bg-brand-dark/50 px-2.5 py-2.5">
-            <span class="text-[0.8rem] font-medium text-brand-cream">Microfono</span>
-            <p class="m-0 text-[0.74rem] leading-relaxed text-brand-cream/60">
-              Necessario per registrare la tua voce.
-            </p>
+          <div class="flex flex-col">
             <button
-              class="self-start rounded-lg border border-brand-light px-3 py-1.5 text-[0.74rem] font-semibold text-brand-light transition hover:bg-brand-light/10"
-              onclick={() => openPermissionSettings("microphone")}>Apri Impostazioni di Sistema</button
+              type="button"
+              class="flex items-start gap-2.5 rounded-lg px-2 py-1.5 text-left transition hover:bg-brand-dark/50 cursor-pointer"
+              onclick={() => openPermissionSettings("microphone")}
             >
-          </div>
-
-          <div class="flex flex-col gap-1.5 rounded-lg border border-brand-cream/10 bg-brand-dark/50 px-2.5 py-2.5">
-            <div class="flex items-center gap-2">
-              <span class={`h-2 w-2 shrink-0 rounded-full ${screenRecordingGranted ? "bg-green-500" : "bg-gray-400"}`}></span>
-              <span class="text-[0.8rem] font-medium text-brand-cream">Registrazione schermo</span>
-            </div>
-            <p class="m-0 text-[0.74rem] leading-relaxed text-brand-cream/60">
-              Necessaria per catturare l'audio di sistema (richiesta da ScreenCaptureKit).
-            </p>
-            <div class="flex gap-2">
-              {#if !screenRecordingGranted}
-                <button
-                  class="rounded-lg border border-brand-light px-3 py-1.5 text-[0.74rem] font-semibold text-brand-light transition hover:bg-brand-light/10"
-                  onclick={requestScreenRecording}>Richiedi accesso</button
+              <Mic size={16} class="mt-0.5 shrink-0 text-brand-cream/70" />
+              <div class="flex flex-col gap-0.5">
+                <span class="text-[0.8rem] font-medium text-brand-cream"
+                  >Microfono</span
                 >
+                <p
+                  class="m-0 text-[0.7rem] leading-relaxed text-brand-cream/60"
+                >
+                  Necessario per registrare la tua voce.
+                </p>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              class="flex items-start gap-2.5 rounded-lg px-2 py-1.5 text-left transition hover:bg-brand-dark/50 cursor-pointer"
+              onclick={() => openPermissionSettings("screen-recording")}
+            >
+              {#if screenRecordingGranted}
+                <MonitorCheck
+                  size={16}
+                  class="mt-0.5 shrink-0 text-green-500"
+                />
+              {:else}
+                <MonitorX
+                  size={16}
+                  class="mt-0.5 shrink-0 text-brand-cream/70"
+                />
               {/if}
-              <button
-                class="rounded-lg border border-brand-light px-3 py-1.5 text-[0.74rem] font-semibold text-brand-light transition hover:bg-brand-light/10"
-                onclick={() => openPermissionSettings("screen-recording")}>Apri Impostazioni di Sistema</button
-              >
-            </div>
+              <div class="flex flex-col gap-0.5">
+                <span class="text-[0.8rem] font-medium text-brand-cream"
+                  >Cattura audio sistema</span
+                >
+                <p
+                  class="m-0 text-[0.7rem] leading-relaxed text-brand-cream/60"
+                >
+                  Necessaria per catturare l'audio di sistema (richiesta da
+                  ScreenCaptureKit).
+                </p>
+              </div>
+            </button>
           </div>
         </div>
 
-        {#if localReady}
-          <p class="m-0 text-sm font-medium text-green-400">Modello installato e pronto.</p>
-        {:else}
-          <p class="m-0 text-[0.82rem] leading-relaxed text-brand-cream/80">
-            Scarica il modello Whisper large-v3-turbo (~1.5 GB).
-            Necessario solo al primo avvio.
-          </p>
-        {/if}
-
         <div class="flex flex-col gap-1.5">
-          <span class="text-[0.78rem] font-semibold text-brand-cream">Cartella modello</span>
-          {#if modelPath}
-            <div class="flex flex-col gap-1 rounded-lg border border-brand-cream/10 bg-brand-dark/50 px-2.5 py-2">
-              <span class="text-[0.62rem] font-semibold tracking-wider text-brand-cream/40 uppercase"
-                >Percorso</span
-              >
-              <p class="m-0 font-mono text-[0.72rem] break-all text-brand-cream/70">{modelPath}</p>
-            </div>
-          {/if}
-          <div class="flex gap-2">
-            <button
-              class="flex-1 rounded-lg border border-brand-light px-4 py-2.5 text-[0.8rem] font-semibold text-brand-light transition hover:bg-brand-light/10"
-              onclick={changeModelDir}>Cambia cartella</button
+          <div class="flex items-center justify-between">
+            <span class="text-[0.78rem] font-semibold text-brand-cream"
+              >Modello locale</span
             >
+
             {#if modelPath}
               <button
-                class="flex-1 rounded-lg border border-brand-light px-4 py-2.5 text-[0.8rem] font-semibold text-brand-light transition hover:bg-brand-light/10"
-                onclick={revealModel}>Mostra nel Finder</button
+                class="p-2 cursor-pointer font-semibold text-brand-light transition hover:text-brand-cream"
+                onclick={revealModel}><Folder size={20} /></button
               >
             {/if}
           </div>
+
+          {#if localReady}
+            <p class="m-0 text-xs font-medium text-green-400">
+              Modello installato e pronto.
+            </p>
+          {:else}
+            <p class="m-0 text-[0.82rem] leading-relaxed text-brand-cream/80">
+              Scarica il modello Whisper large-v3-turbo (~1.5 GB). Necessario
+              solo al primo avvio.
+            </p>
+          {/if}
+
+          {#if modelPath}
+            <div
+              class="flex flex-col gap-1 rounded-lg border border-brand-cream/10 bg-brand-dark/50 px-2.5 py-2"
+            >
+              <span
+                class="text-[0.62rem] font-semibold tracking-wider text-brand-cream/40 uppercase"
+                >Percorso</span
+              >
+              <p
+                class="m-0 font-mono text-[0.72rem] break-all text-brand-cream/70"
+              >
+                {modelPath}
+              </p>
+            </div>
+          {/if}
 
           {#if downloading && dlProgress}
             <div class="flex flex-col gap-1 pt-1">
@@ -245,29 +242,34 @@ const dlLabel = $derived(
         </div>
 
         <div class="flex flex-col gap-1.5">
-          <span class="text-[0.78rem] font-semibold text-brand-cream">Cartella registrazioni</span>
+          <div class="flex items-center justify-between">
+            <span class="text-[0.78rem] font-semibold text-brand-cream"
+              >Cartella registrazioni</span
+            >
+
+            {#if recordingsDir}
+              <button
+                class="p-2 cursor-pointer font-semibold text-brand-light transition hover:text-brand-cream"
+                onclick={revealRecordings}><Folder size={20} /></button
+              >
+            {/if}
+          </div>
+
           {#if recordingsDir}
-            <div class="flex flex-col gap-1 rounded-lg border border-brand-cream/10 bg-brand-dark/50 px-2.5 py-2">
-              <span class="text-[0.62rem] font-semibold tracking-wider text-brand-cream/40 uppercase"
+            <div
+              class="flex flex-col gap-1 rounded-lg border border-brand-cream/10 bg-brand-dark/50 px-2.5 py-2"
+            >
+              <span
+                class="text-[0.62rem] font-semibold tracking-wider text-brand-cream/40 uppercase"
                 >Percorso</span
               >
-              <p class="m-0 font-mono text-[0.72rem] break-all text-brand-cream/70">
+              <p
+                class="m-0 font-mono text-[0.72rem] break-all text-brand-cream/70"
+              >
                 {recordingsDir}
               </p>
             </div>
           {/if}
-          <div class="flex gap-2">
-            <button
-              class="flex-1 rounded-lg border border-brand-light px-4 py-2.5 text-[0.8rem] font-semibold text-brand-light transition hover:bg-brand-light/10"
-              onclick={changeRecordingsDir}>Cambia cartella</button
-            >
-            {#if recordingsDir}
-              <button
-                class="flex-1 rounded-lg border border-brand-light px-4 py-2.5 text-[0.8rem] font-semibold text-brand-light transition hover:bg-brand-light/10"
-                onclick={revealRecordings}>Mostra nel Finder</button
-              >
-            {/if}
-          </div>
         </div>
       </div>
 

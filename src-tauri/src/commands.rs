@@ -384,7 +384,10 @@ fn prepare_for_whisper(wav_bytes: &[u8]) -> Result<Vec<u8>, String> {
 }
 
 #[tauri::command]
-pub async fn transcribe_recording(_app: AppHandle, path: String) -> Result<TranscriptResult, String> {
+pub async fn transcribe_recording(
+    _app: AppHandle,
+    path: String,
+) -> Result<TranscriptResult, String> {
     let base_url = format!("http://127.0.0.1:{LOCAL_PORT}");
 
     let file_bytes = tokio::fs::read(&path).await.map_err(|e| e.to_string())?;

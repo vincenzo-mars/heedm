@@ -67,36 +67,39 @@ Flusso principale:
 
 ### `SttIndicator` — `src/lib/SttIndicator.svelte`
 
-Indicatore stato server STT + pulsante ⚙ impostazioni (icona nuda `text-brand-cream`, nessuno sfondo/forma bottone — solo `opacity` su hover).
+Due elementi flottanti separati in basso (non più un'unica pillola):
+- **Pulsante impostazioni**: rotondo a sé, `right-4 bottom-4`, icona `Settings` (`@lucide/svelte`), `bg-brand-darker/85`, hover invertito (`hover:bg-brand-cream hover:text-brand-darker`)
+- **Pillola di stato STT**: `left-4 bottom-4`, dot + label, niente bottone incorporato
 
-| Stato | Colore dot | Label |
-|---|---|---|
-| `checking` | grigio (blink) | "controllo..." |
-| `starting` | giallo (blink) | "avvio server..." |
-| `running` | verde | "server attivo" |
-| `error` | rosso | "server non disponibile" |
+| Stato | Colore dot | Colore testo | Label |
+|---|---|---|---|
+| `checking` | grigio (blink) | `text-brand-cream/50` | "Controllo..." |
+| `starting` | giallo (blink) | `text-brand-cream/50` | "Avvio server..." |
+| `running` | verde | `text-brand-cream` | "Server attivo" |
+| `error` | rosso | `text-brand-cream` | "Server non disponibile" |
+
+Il colore semantico (verde/rosso) vive solo sul dot — il testo resta sempre `brand-cream` per uniformità visiva con la pillola.
 
 ### `SettingsPanel` — `src/lib/SettingsPanel.svelte`
 
-Modal "Impostazioni": permessi OS, setup/download modello Whisper, cartelle. (Il binario `whisper-server` non si scarica più — è bundled nell'app, vedi `docs/backend/stt.md`.) Contenitore `max-h-[85vh]`, corpo centrale `overflow-y-auto`/`min-h-0` — header e bottone "Salva" restano fissi, le sezioni scrollano (sempre più sezioni di quante ne entrino in 90vw×640px).
+Modal "Impostazioni": permessi OS, setup/download modello Whisper, cartelle. (Il binario `whisper-server` non si scarica più — è bundled nell'app, vedi `docs/backend/stt.md`.) Contenitore `max-h-[85vh]`, corpo centrale `overflow-y-auto`/`min-h-0` — header e bottone "Salva" restano fissi, le sezioni scrollano (sempre più sezioni di quante ne entrino in 90vw×640px). Chiusura con icona `X` (`@lucide/svelte`), non più glifo testuale.
 
-**Sezione Permessi** (prima — i permessi bloccano tutto il resto), riquadri `bg-brand-dark/50`:
-- **Microfono**: descrizione + `[Apri Impostazioni di Sistema]` → `open_permission_settings({ pane: "microphone" })`. Niente stato live: l'unica API di sistema per lo stato di autorizzazione è `AVCaptureDevice.authorizationStatus`, Objective-C — bridging `objc2` solo per un pallino non vale la complessità (vedi `docs/backend/commands.md` → Permessi OS)
-- **Registrazione schermo**: pallino di stato (stesso linguaggio di `SttIndicator` — `bg-green-500` concesso / `bg-gray-400` da concedere), popolato da `check_screen_recording_permission` al mount → `[Richiedi accesso]` (visibile solo se non concesso, chiama `request_screen_recording_permission` poi ri-controlla lo stato) + `[Apri Impostazioni di Sistema]`
+**Sezione Permessi** (prima — i permessi bloccano tutto il resto), voci elenco (icona/stato + titolo + descrizione su riga sotto), intera voce cliccabile (no bottoni interni) → `open_permission_settings({ pane })`:
+- **Microfono**: icona `Mic`, descrizione, click → pane `"microphone"`. Niente stato live: l'unica API di sistema per lo stato di autorizzazione è `AVCaptureDevice.authorizationStatus`, Objective-C — bridging `objc2` solo per un pallino non vale la complessità (vedi `docs/backend/commands.md` → Permessi OS)
+- **Cattura audio sistema**: icona di stato (`MonitorCheck` verde se concesso, `MonitorX` grigio se da concedere — stesso significato del dot di `SttIndicator`, ma come icona invece di pallino), popolata da `check_screen_recording_permission` al mount, click → pane `"screen-recording"`
 
 Logica:
 - Mount → `get_stt_settings` + `get_local_model_path` + `get_recordings_dir` + `check_screen_recording_permission` + `listen("download-progress")`
 - Se `localReady`: mostra messaggio "Modello installato e pronto"
 - Altrimenti: mostra warning dimensioni
 
-Due gruppi "cartella", azioni raggruppate per pertinenza (non sparse) — bottoni outline (`border-brand-light`/`text-brand-light`) sempre in coppia `flex-1` per garantire stessa larghezza/altezza:
-- **Cartella modello**: path in riquadro `bg-brand-dark/50` con micro-label "Percorso" (`uppercase`/`tracking-wider`/`text-brand-cream/40`) sopra il path monospace — distingue il valore di sola lettura dai controlli → riga `[Cambia cartella] [Mostra nel Finder]` (mostrato appena `modelPath` è noto, anche prima del download) → progress bar (durante download) → `[Scarica / Scarica di nuovo]` (bottone pieno `bg-brand-lighter`, label cambia in base a `localReady`)
-- **Cartella registrazioni**: stesso riquadro path con label "Percorso" → riga `[Cambia cartella] [Mostra nel Finder]`
+Due sezioni "percorso", sola visualizzazione + reveal (niente più cambio cartella dalla UI — `pick_directory`/`changeModelDir`/`changeRecordingsDir` rimossi):
+- **Modello locale**: titolo + icona `Folder` (mostrata solo se `modelPath` noto) → `revealModel`; sotto: messaggio stato (`localReady` → "Modello installato e pronto" verde, altrimenti warning dimensioni) → riquadro path `bg-brand-dark/50` con micro-label "Percorso" (`uppercase`/`tracking-wider`/`text-brand-cream/40`) sopra il path monospace → progress bar (durante download) → `[Scarica / Scarica di nuovo]` (bottone pieno `bg-brand-lighter`, label cambia in base a `localReady`, `disabled` durante download)
+- **Cartella registrazioni**: stesso pattern titolo + icona `Folder` → `revealRecordings`, riquadro path sotto
 
 Logica:
-- `pick_directory` → salva in `settings.modelDir`/`recordingsDir`; cambio cartella modello chiede conferma (nessuna migrazione automatica del file ~1.5GB — l'utente dovrà riscaricare nella nuova posizione, `localReady` viene resettato a `false`)
-- "Mostra nel Finder" → `revealItemInDir` (plugin opener). Per le registrazioni rivela `recordingsDir` (sempre creata da `get_recordings_dir`); per il modello rivela la cartella padre di `modelPath` invece del file — il file `.bin` potrebbe non esistere ancora se il modello non è stato scaricato, mentre `get_local_model_path` garantisce che la cartella esista
-- Durante download: progress bar singolo step (modello), label percentuale
+- "Mostra nel Finder" (icona `Folder`, visibile solo a path noto) → `revealItemInDir` (plugin opener). Per le registrazioni rivela `recordingsDir` (sempre creata da `get_recordings_dir`); per il modello rivela la cartella padre di `modelPath` invece del file — il file `.bin` potrebbe non esistere ancora se il modello non è stato scaricato, mentre `get_local_model_path` garantisce che la cartella esista
+- Durante download: progress bar singolo step (modello), label percentuale; errore propagato (`throw`, non più `alert`) — risale a chi chiama `startDownload`
 - Save → `save_stt_settings` → `onSaved(settings)` → chiude modal → `ensureServer()`
 
 ### `RecordingItem` — `src/lib/RecordingItem.svelte`
