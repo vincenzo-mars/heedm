@@ -30,7 +30,7 @@ app → whisper-server (127.0.0.1:8080) → modello ggml → TranscriptResult
 
 Default quando l'utente non ha scelto un percorso (`model_dir`/`recordings_dir` = `null`):
 - `model_dir` → `app_data_dir` (macOS: `~/Library/Application Support/com.vincenzomars.heedm/`) — dati app persistenti, non visibili in Finder normale
-- `recordings_dir` → `audio_dir()/Heedm/Records` (macOS: `~/Music/Heedm/Records/`) — cartella standard contenuti audio, visibile e indicizzata da Spotlight; sottocartella `Records` separa le registrazioni da eventuali altri file dell'app dentro `Heedm`
+- `recordings_dir` → `document_dir()/Heedm/Records` (macOS: `~/Documents/Heedm/Records/`) — cartella standard documenti utente, visibile e indicizzata da Spotlight; sottocartella `Records` separa le registrazioni da eventuali altri file dell'app dentro `Heedm`
 
 Nome file generato con timestamp leggibile locale (`chrono::Local::now()`, formato `%Y-%m-%d %H.%M.%S`), es. `Registrazione 2026-06-07 15.30.12.wav`.
 
@@ -61,7 +61,7 @@ pub struct SttSettings {
     pub local_ready: bool,           // binario + modello presenti su disco
     pub configured: bool,            // utente ha completato setup
     pub model_dir: Option<String>,   // None = default (app_data_dir)
-    pub recordings_dir: Option<String>, // None = default (audio_dir/Heedm)
+    pub recordings_dir: Option<String>, // None = default (document_dir/Heedm)
 }
 ```
 Serializzata come JSON in `settings.json` (camelCase).

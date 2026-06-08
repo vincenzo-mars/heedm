@@ -70,7 +70,7 @@ fn local_model_path(app: &AppHandle, settings: &SttSettings) -> PathBuf {
 
 fn default_recordings_dir(app: &AppHandle) -> PathBuf {
     app.path()
-        .audio_dir()
+        .document_dir()
         .unwrap_or_else(|_| app_data_dir(app))
         .join("Heedm")
         .join("Records")

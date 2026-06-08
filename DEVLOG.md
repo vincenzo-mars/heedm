@@ -13,6 +13,22 @@ Formato:
 
 ---
 
+## 2026-06-08 — Cartella registrazioni default: da ~/Music a ~/Documents
+
+**Obiettivo:** spostare la cartella default delle registrazioni da `~/Music/Heedm/Records/` a `~/Documents/Heedm/Records/`.
+
+**Fatto:**
+- `default_recordings_dir` in `commands.rs`: sostituito `app.path().audio_dir()` con `app.path().document_dir()`
+- Doc aggiornati: `docs/backend/stt.md` (path default e commento `recordings_dir`), `docs/frontend/ui.md` (commento `recordingsDir`)
+
+**Decisioni:**
+- **Documents invece di Music**: i file prodotti (WAV + trascrizioni) sono documenti utente generati da un'app di produttività, non contenuti musicali — `~/Documents` è la posizione convenzionale macOS per questo tipo di output, oltre a restare visibile in Finder e indicizzata da Spotlight come `audio_dir`. Nessuna capability/entitlement aggiuntiva richiesta (`document_dir()` è API standard Tauri v2)
+- Nessuna migrazione automatica delle registrazioni già presenti in `~/Music/Heedm`: resta a discrezione dell'utente spostarle
+
+**Prossimi passi:** —
+
+---
+
 ## 2026-06-08 — Implementata opzione 2: registrazioni a 16kHz fisso (era rate nativo del mic)
 
 **Obiettivo:** completare la riduzione dimensione WAV avviata con l'entry sotto (16-bit PCM) — applicare anche l'opzione 2 dell'analisi originale, abbassando il sample rate di registrazione a 16kHz fisso (lo stesso richiesto da whisper). Ulteriore ~3× di riduzione (16-bit@48kHz ≈ 5.6MB/min → 16-bit@16kHz ≈ 1.83MB/min — combinato ~6× rispetto all'originale Float32@48kHz ~11.5MB/min).

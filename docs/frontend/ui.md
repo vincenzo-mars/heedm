@@ -131,7 +131,7 @@ interface SttSettings {
   localReady: boolean;
   configured: boolean;
   modelDir: string | null;      // null = default (app_data_dir)
-  recordingsDir: string | null; // null = default (audio_dir/Heedm)
+  recordingsDir: string | null; // null = default (document_dir/Heedm)
 }
 
 interface Recording {
