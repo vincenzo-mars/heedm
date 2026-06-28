@@ -1,5 +1,6 @@
 <script lang="ts">
 import { Settings } from "@lucide/svelte";
+import Button from "./Button.svelte";
 import type { SttStatus } from "./types";
 
 let {
@@ -36,11 +37,9 @@ const STATUS: Record<SttStatus, { label: string; text: string; dot: string }> =
 </script>
 
 <div class="fixed right-4 bottom-4 z-10 flex items-center gap-2.5">
-  <button
-    class="rounded-full bg-brand-darker/85 p-2 shadow-[0_2px_12px_rgba(0,0,0,0.3)] hover:bg-brand-cream hover:text-brand-darker ease-in-out transition-all backdrop-blur-sm cursor-pointer"
-    onclick={onSettingsClick}
-    title="Impostazioni"><Settings size={16} /></button
-  >
+  <Button variant="icon" onclick={onSettingsClick} title="Impostazioni">
+    <Settings size={16} />
+  </Button>
 </div>
 
 <div

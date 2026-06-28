@@ -126,6 +126,15 @@ Logica:
 - Durante download: progress bar singolo step (modello), label percentuale; errore propagato (`throw`, non più `alert`) — risale a chi chiama `startDownload`
 - Save → `save_stt_settings` → `onSaved(settings)` → chiude modal → `ensureServer()`
 
+### `Button` — `src/lib/Button.svelte`
+
+Wrapper bottone con 2 varianti brand ripetute nell'app. Accetta tutte le `HTMLButtonAttributes` + `class` per override.
+
+| Variant | Uso |
+|---|---|
+| `ghost` (default) | Bottoni inline piccoli: back button, "Apri cartella" |
+| `icon` | Bottoni icona floating: Settings, navigazione lista |
+
 ### `RecordsList` — `src/lib/RecordsList.svelte`
 
 Vista elenco registrazioni. On mount chiama `list_recordings`, mostra ogni entry come pulsante con nome (timestamp cartella) + badge "trascritto"/"in attesa". Click → `onSelect(entry)`. Props: `onSelect`, `onBack`.

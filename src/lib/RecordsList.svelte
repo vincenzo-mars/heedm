@@ -1,5 +1,6 @@
 <script lang="ts">
 import { invoke } from "@tauri-apps/api/core";
+import Button from "./Button.svelte";
 import type { RecordingEntry } from "./types";
 
 let {
@@ -26,13 +27,7 @@ $effect(() => {
 
 <div class="flex w-full max-w-170 flex-col gap-4">
   <div class="flex items-center gap-3">
-    <button
-      class="cursor-pointer text-brand-cream/60 transition-colors hover:text-brand-cream"
-      onclick={onBack}
-      aria-label="Torna indietro"
-    >
-      ← Indietro
-    </button>
+    <Button onclick={onBack} aria-label="Torna indietro">← Indietro</Button>
     <h2
       class="m-0 text-xs font-semibold tracking-wider text-brand-cream/50 uppercase"
     >

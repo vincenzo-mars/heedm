@@ -1,6 +1,7 @@
 <script lang="ts">
 import { List } from "@lucide/svelte";
 import { invoke } from "@tauri-apps/api/core";
+import Button from "./lib/Button.svelte";
 import RecordingDetail from "./lib/RecordingDetail.svelte";
 import RecordsList from "./lib/RecordsList.svelte";
 import SettingsPanel from "./lib/SettingsPanel.svelte";
@@ -92,16 +93,15 @@ function handleSettingsSaved(_s: SttSettings) {
 <div
   class="flex h-screen flex-col items-center gap-8 overflow-y-auto px-6 pt-6 pb-18 box-border"
 >
-  <button
-    class="fixed right-4 top-4 z-10 cursor-pointer rounded-full bg-brand-darker/85 p-2 shadow-[0_2px_12px_rgba(0,0,0,0.3)] backdrop-blur-sm transition-all hover:bg-brand-cream hover:text-brand-darker"
-    onclick={() => {
-      view = "list";
-    }}
+  <Button
+    variant="icon"
+    class="fixed right-4 top-4 z-10"
+    onclick={() => { view = "list"; }}
     title="Registrazioni"
     aria-label="Vai alle registrazioni"
   >
     <List size={16} />
-  </button>
+  </Button>
 
   {#if view === "record"}
     <main
