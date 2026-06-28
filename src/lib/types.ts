@@ -13,7 +13,7 @@ export interface SttSettings {
 }
 
 export interface DownloadProgress {
-  step: "binary" | "model" | "done";
+  step: "model" | "done";
   pct: number;
 }
 
@@ -36,7 +36,6 @@ export interface TranscriptResult {
 export interface RecordingEntry {
   folder_path: string;
   name: string;
-  wav_path: string;
   transcript: TranscriptResult | null;
 }
 

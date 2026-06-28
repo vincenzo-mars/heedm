@@ -1,3 +1,4 @@
+pub mod aec;
 pub mod diarization;
 pub mod mic;
 pub mod mixer;

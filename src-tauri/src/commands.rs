@@ -483,7 +483,6 @@ pub struct RecordingStatus {
 pub struct RecordingEntry {
     pub folder_path: String,
     pub name: String,
-    pub wav_path: String,
     pub transcript: Option<TranscriptResult>,
 }
 
@@ -551,6 +550,14 @@ pub async fn stop_recording(
         // start_recording). Riallineiamo il mic a `sr` prima di mixer/diarizzazione
         // — entrambi richiedono buffer allo stesso rate.
         let mic = resample_linear(&mic_raw, inner.mic_native_rate, sr);
+
+        // AEC: rimuove l'echo acustico di sys dal mic prima di diarizzazione e mix.
+        // Solo quando sys è attivo — senza audio di sistema non c'è echo da cancellare.
+        let mic = if had_sys_audio && !sys.is_empty() {
+            crate::recorder::aec::cancel_echo(&mic, &sys, sr)
+        } else {
+            mic
+        };
 
         // Solo se è stato catturato anche audio di sistema ha senso stimare un
         // timeline mic-vs-sistema: senza una seconda sorgente sarebbe sempre "mic".
@@ -622,8 +629,7 @@ pub async fn list_recordings(app: AppHandle) -> Result<Vec<RecordingEntry>, Stri
         if !folder.is_dir() {
             continue;
         }
-        let wav_path = folder.join("recording.wav");
-        if !wav_path.exists() {
+        if !folder.join("recording.wav").exists() {
             continue;
         }
         let name = folder
@@ -643,7 +649,6 @@ pub async fn list_recordings(app: AppHandle) -> Result<Vec<RecordingEntry>, Stri
         result.push(RecordingEntry {
             folder_path: folder.to_string_lossy().into_owned(),
             name,
-            wav_path: wav_path.to_string_lossy().into_owned(),
             transcript,
         });
     }

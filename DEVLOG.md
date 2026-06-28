@@ -13,6 +13,24 @@ Formato:
 
 ---
 
+## 2026-06-28 — AEC: rimozione echo acustico dal microfono
+
+**Obiettivo:** quando l'utente usa le casse del Mac, l'audio di sistema (colleghi) veniva ripreso dal microfono causando diarizzazione errata (tutto "both") e overlapping fasullo in trascrizione.
+
+**Root cause:** `estimate_timeline` confronta energia RMS mic vs sys, ma mic già contiene l'echo di sys → i livelli risultano sempre comparabili.
+
+**Fatto:**
+- Nuovo `src-tauri/src/recorder/aec.rs`: AEC offline puro Rust — cross-correlazione normalizzata per stimare il delay acustico (finestra 2s, max 200ms), least-squares per stimare α, sottrazione con clamp
+- `stop_recording` (commands.rs): applica `aec::cancel_echo(&mic, &sys, sr)` dopo il resample del mic e prima di `estimate_timeline`/`mix` — solo quando sys attivo
+- Nessun nuovo crate
+
+**Decisioni:**
+- Offline (post-processing) invece di real-time: più semplice, funziona per il caso d'uso (registrazione poi trascrizione)
+- Skip AEC se correlazione < 0.10: evita di peggiorare registrazioni senza echo
+- `ponytail:` comment nel file — se in futuro serve gestire reverb multi-path, upgrade a `webrtc-audio-processing`
+
+---
+
 ## 2026-06-28 — Folder-per-recording + Records view
 
 **Obiettivo:** struttura a cartella per registrazione, persistenza trascrizione su disco, UI separata per sfogliare i record storici.

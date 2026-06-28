@@ -16,7 +16,6 @@ let {
 let settings = $state<SttSettings | null>(null);
 let downloading = $state(false);
 let dlProgress = $state<DownloadProgress | null>(null);
-let localReady = $state(false);
 let modelPath = $state<string | null>(null);
 let recordingsDir = $state<string | null>(null);
 let screenRecordingGranted = $state(false);
@@ -24,7 +23,6 @@ let screenRecordingGranted = $state(false);
 $effect(() => {
   invoke<SttSettings>("get_stt_settings").then((s) => {
     settings = s;
-    localReady = s.localReady;
   });
   invoke<string>("get_local_model_path").then((p) => {
     modelPath = p;
@@ -38,7 +36,7 @@ $effect(() => {
     dlProgress = e.payload;
     if (e.payload.step === "done") {
       downloading = false;
-      localReady = true;
+      if (settings) settings = { ...settings, localReady: true };
     }
   });
 
@@ -49,21 +47,10 @@ $effect(() => {
 
 async function save() {
   if (!settings) return;
-  const updated: SttSettings = {
-    ...settings,
-    localReady,
-    configured: true,
-  };
+  const updated: SttSettings = { ...settings, configured: true };
   await invoke("save_stt_settings", { settings: updated });
   onSaved(updated);
   onClose();
-}
-
-function revealModel() {
-  if (!modelPath) return;
-  // Il file modello potrebbe non esistere ancora (download non fatto) — rivela la cartella che lo conterrà
-  const dir = modelPath.slice(0, modelPath.lastIndexOf("/"));
-  revealItemInDir(dir);
 }
 
 function revealRecordings() {
@@ -79,7 +66,6 @@ async function refreshScreenRecordingStatus() {
 function openPermissionSettings(pane: "microphone" | "screen-recording") {
   invoke("open_permission_settings", { pane });
 }
-
 async function startDownload() {
   downloading = true;
   dlProgress = null;
@@ -90,14 +76,6 @@ async function startDownload() {
     throw e;
   }
 }
-
-const dlLabel = $derived(
-  dlProgress?.step === "model"
-    ? `Modello ${dlProgress.pct}%`
-    : dlProgress?.step === "done"
-      ? "Completato"
-      : null,
-);
 </script>
 
 {#if settings}
@@ -184,12 +162,12 @@ const dlLabel = $derived(
             {#if modelPath}
               <button
                 class="p-2 cursor-pointer font-semibold text-brand-light transition hover:text-brand-cream"
-                onclick={revealModel}><Folder size={20} /></button
+                onclick={() => revealItemInDir(modelPath!.slice(0, modelPath!.lastIndexOf("/")))}><Folder size={20} /></button
               >
             {/if}
           </div>
 
-          {#if localReady}
+          {#if settings?.localReady}
             <p class="m-0 text-xs font-medium text-green-400">
               Modello installato e pronto.
             </p>
@@ -224,7 +202,7 @@ const dlLabel = $derived(
                   style={`width: ${dlProgress.pct}%`}
                 ></div>
               </div>
-              <span class="text-xs text-brand-cream/55">{dlLabel}</span>
+              <span class="text-xs text-brand-cream/55">{dlProgress?.step === "model" ? `Modello ${dlProgress.pct}%` : "Completato"}</span>
             </div>
           {/if}
 
@@ -235,7 +213,7 @@ const dlLabel = $derived(
           >
             {downloading
               ? "Download in corso..."
-              : localReady
+              : settings?.localReady
                 ? "Scarica di nuovo"
                 : "Scarica"}
           </button>

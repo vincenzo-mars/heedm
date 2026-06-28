@@ -108,6 +108,26 @@ Records/
 
 ---
 
+## AEC — Acoustic Echo Cancellation (`aec.rs`)
+
+### `cancel_echo(mic: &[f32], sys: &[f32], sample_rate: u32) -> Vec<f32>`
+
+Rimuove l'echo acustico di `sys` dal segnale `mic` (i.e. la porzione di audio di sistema captata dalle casse e ripresa dal microfono). Applicato in `stop_recording` (`commands.rs`) dopo il resample del mic, prima di `estimate_timeline` e `mix`.
+
+**Algoritmo offline in 3 step:**
+
+1. **Delay estimation** via cross-correlazione normalizzata: usa i primi 2s di segnale per trovare il lag `d ∈ [0, 200ms]` che massimizza `C(d) = Σ mic[i+d] * sys[i] / (n * rms_mic * rms_sys)`. Se `max_corr < 0.10` → echo trascurabile, skip.
+
+2. **Stima attenuazione** α via least-squares: `α = Σ(mic[i] * sys[i-d]) / Σ(sys[i-d]²)`, clamp `[0, 1]`.
+
+3. **Sottrazione**: `clean_mic[i] = clamp(mic[i] - α * sys[i-d], -1.0, 1.0)` per `i ≥ d`.
+
+**Non applicato** se `sys` è vuoto o se la cattura audio di sistema non era attiva — nessuna regressione per registrazioni solo-microfono.
+
+**Limitazioni**: copre il percorso echo diretto dominante. Non gestisce reverb multi-path; assume delay stabile durante la registrazione. Per casi complessi (stanze riverberate, delay variabile), upgrade a `webrtc-audio-processing`.
+
+---
+
 ## Writer (`writer.rs`)
 
 ### `write_wav(samples: &[f32], path: &Path, sample_rate: u32, channels: u16) -> Result<(), String>`
