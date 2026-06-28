@@ -13,6 +13,26 @@ Formato:
 
 ---
 
+## 2026-06-15 — Integrazione shadcn-svelte
+
+**Obiettivo:** introdurre shadcn-svelte come libreria di componenti UI primitivi, mantenendo la palette brand esistente.
+
+**Fatto:**
+- `npx shadcn-svelte@latest init` (style `vega`, base color `neutral`, icon library `lucide`) → genera `components.json`, `src/lib/utils.ts` (`cn()`), aggiunge dipendenze (`clsx`, `tailwind-merge`, `tailwind-variants`, `tw-animate-css`, `@fontsource-variable/inter`)
+- `vite.config.ts` / `tsconfig.json`: alias `$lib` → `src/lib` (progetto non-SvelteKit, alias non automatico)
+- `src/App.css`: token semantici shadcn (`--background`, `--primary`, ecc.) rimappati in `:root` sulla palette `--color-brand-*` esistente; rimosso blocco `.dark{}` generato dal CLI
+- Primo componente installato: `Button` (`src/lib/components/ui/button/`)
+- Doc: `docs/frontend/ui.md` — sezione "shadcn-svelte" con tabella mapping token
+
+**Decisioni:**
+- Niente `.dark{}`/toggle: Heedm è sempre in dark theme fisso, i token shadcn diventano l'unica fonte di verità puntando alla palette brand — le utility `dark:*` dei componenti generati restano inerti
+- Style `vega` ("the classic shadcn/ui look") scelto come preset base — più neutro da skinare via token, rispetto a preset con font/icon-set più opinionati
+- `@lucide/svelte` spostato da `dependencies` a `devDependencies` dal CLI (convenzione shadcn-svelte per progetti Vite) — non impatta il bundle finale, lasciato com'è
+
+**Prossimi passi:** migrare progressivamente i componenti custom (`SettingsPanel`, `RecordingItem`, ecc.) verso primitive `ui/*` dove sensato (es. bottoni, dialog/modal).
+
+---
+
 ## 2026-06-08 18-35 — Termina whisper-server alla chiusura dell'app
 
 **Obiettivo:** `whisper-server` restava in background (processo orfano) dopo il quit di Heedm, perché veniva spawnato senza tenerne l'handle.

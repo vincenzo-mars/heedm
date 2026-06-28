@@ -12,6 +12,26 @@ Setup (config CSS-first, Tailwind v4 — niente `tailwind.config.js`):
 - `vite.config.ts`: plugin `@tailwindcss/vite` registrato in `plugins`
 - `src/App.css`: `@import "tailwindcss";` in testa
 
+### shadcn-svelte
+
+Componenti UI primitivi (`Button`, ecc.) in `src/lib/components/ui/`, generati via CLI (`npx shadcn-svelte@latest add <componente>`) — non modificare a mano lo stile interno dei componenti `ui/*`, sono codice generato e re-installabile.
+
+- `components.json` — config CLI (alias, base color `neutral`, style `vega`, icon library `lucide`)
+- Alias `$lib` → `src/lib` (`vite.config.ts` → `resolve.alias`, `tsconfig.json` → `compilerOptions.paths`); non è SvelteKit quindi l'alias non è automatico
+- `src/lib/utils.ts` — helper `cn()` (clsx + tailwind-merge) e tipi utility (`WithElementRef`, ecc.), usati dai componenti `ui/*`
+- `src/App.css`: `@import "tw-animate-css"`, `@import "shadcn-svelte/tailwind.css"`, `@import "@fontsource-variable/inter"`, `@custom-variant dark (&:is(.dark *))`
+
+**Token semantici shadcn → palette brand**: Heedm ha un solo tema (dark, fisso, niente toggle) — i token `--background`/`--foreground`/`--primary`/`--card`/ecc. definiti in `:root` (`App.css`) puntano direttamente alle variabili `--color-brand-*` invece dei grigi oklch generati di default. Niente blocco `.dark{}`: le utility `dark:*` dei componenti `ui/*` restano inerti (nessun elemento ha mai classe `.dark`).
+
+| Token shadcn | Mappato a |
+|---|---|
+| `background` / `foreground` | `brand-dark` / `brand-cream` |
+| `card`, `popover`, `secondary`, `muted`, `sidebar` | `brand-darker` |
+| `primary`, `ring`, `sidebar-primary` | `brand-lightest` |
+| `accent`, `destructive`, `sidebar-accent` | `brand-lighter` |
+| `muted-foreground` | `brand-light` |
+| `border`, `input`, `sidebar-border` | `brand-cream` con alpha (12%/16%) |
+
 ### Design tokens (`@theme` in `App.css`)
 
 Palette brand, namespace `brand-*` per non collidere con i token base di Tailwind (`white`/`black`):

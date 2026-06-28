@@ -1,4 +1,9 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn-svelte/tailwind.css";
+@import "@fontsource-variable/inter";
+
+@custom-variant dark (&:is(.dark *));
 
 @theme {
   --color-brand-dark: #290808;
@@ -8,6 +13,45 @@
   --color-brand-lightest: #d23434;
   --color-brand-cream: #fdf6f6;
   --color-brand-ink: #020000;
+  --font-sans: "Inter Variable", Inter, Avenir, Helvetica, Arial, sans-serif;
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
 }
 
 @layer base {
@@ -19,13 +63,56 @@
   }
 
   :root {
-    font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
     font-synthesis: none;
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     color: var(--color-brand-cream);
     background-color: var(--color-brand-dark);
+
+    /* Heedm ha un solo tema (dark, fisso): i token semantici shadcn
+       puntano direttamente alla palette brand, niente blocco .dark */
+    --background: var(--color-brand-dark);
+    --foreground: var(--color-brand-cream);
+    --card: var(--color-brand-darker);
+    --card-foreground: var(--color-brand-cream);
+    --popover: var(--color-brand-darker);
+    --popover-foreground: var(--color-brand-cream);
+    --primary: var(--color-brand-lightest);
+    --primary-foreground: var(--color-brand-cream);
+    --secondary: var(--color-brand-darker);
+    --secondary-foreground: var(--color-brand-cream);
+    --muted: var(--color-brand-darker);
+    --muted-foreground: var(--color-brand-light);
+    --accent: var(--color-brand-lighter);
+    --accent-foreground: var(--color-brand-cream);
+    --destructive: var(--color-brand-lighter);
+    --border: rgb(253 246 246 / 12%);
+    --input: rgb(253 246 246 / 16%);
+    --ring: var(--color-brand-lightest);
+    --chart-1: var(--color-brand-lightest);
+    --chart-2: var(--color-brand-lighter);
+    --chart-3: var(--color-brand-light);
+    --chart-4: var(--color-brand-darker);
+    --chart-5: var(--color-brand-ink);
+    --radius: 0.625rem;
+    --sidebar: var(--color-brand-darker);
+    --sidebar-foreground: var(--color-brand-cream);
+    --sidebar-primary: var(--color-brand-lightest);
+    --sidebar-primary-foreground: var(--color-brand-cream);
+    --sidebar-accent: var(--color-brand-lighter);
+    --sidebar-accent-foreground: var(--color-brand-cream);
+    --sidebar-border: rgb(253 246 246 / 12%);
+    --sidebar-ring: var(--color-brand-lightest);
+  }
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
   }
 }
 
