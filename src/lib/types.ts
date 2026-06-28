@@ -33,13 +33,11 @@ export interface TranscriptResult {
   segments: TranscriptSegment[];
 }
 
-export interface Recording {
-  id: string;
-  path: string;
-  filename: string;
-  status: "transcribing" | "done" | "error";
-  transcript?: TranscriptResult;
-  error?: string;
+export interface RecordingEntry {
+  folder_path: string;
+  name: string;
+  wav_path: string;
+  transcript: TranscriptResult | null;
 }
 
 export type SttStatus = "checking" | "starting" | "running" | "error";
@@ -80,7 +78,7 @@ export function groupSegments(segments: TranscriptSegment[]) {
     const speaker = seg.speaker ?? "unknown";
     const last = groups[groups.length - 1];
     if (last && last.speaker === speaker) {
-      last.text += " " + seg.text.trim();
+      last.text += ` ${seg.text.trim()}`;
     } else {
       groups.push({ speaker, text: seg.text.trim(), start: seg.start });
     }

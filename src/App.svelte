@@ -1,23 +1,26 @@
 <script lang="ts">
+import { List } from "@lucide/svelte";
 import { invoke } from "@tauri-apps/api/core";
-import RecordingItem from "./lib/RecordingItem.svelte";
+import RecordingDetail from "./lib/RecordingDetail.svelte";
+import RecordsList from "./lib/RecordsList.svelte";
 import SettingsPanel from "./lib/SettingsPanel.svelte";
 import SttIndicator from "./lib/SttIndicator.svelte";
 import {
   formatDuration,
-  type Recording,
+  type RecordingEntry,
   type RecordingStatus,
   type SttSettings,
   type SttStatus,
-  type TranscriptResult,
 } from "./lib/types";
 
 let isRecording = $state(false);
 let durationMs = $state(0);
 let error = $state<string | null>(null);
-let recordings = $state<Recording[]>([]);
+let isTranscribing = $state(false);
 let sttStatus = $state<SttStatus>("checking");
 let showSettings = $state(false);
+let view = $state<"record" | "list" | "detail">("record");
+let selectedEntry = $state<RecordingEntry | null>(null);
 
 $effect(() => {
   invoke<SttSettings>("get_stt_settings").then((s) => {
@@ -67,27 +70,11 @@ async function handleRecord() {
       const path = await invoke<string>("stop_recording");
       isRecording = false;
       if (!path) return;
-
-      const filename = path.split("/").pop() ?? path;
-      const id = crypto.randomUUID();
-
-      recordings = [
-        { id, path, filename, status: "transcribing" },
-        ...recordings,
-      ];
-
+      isTranscribing = true;
       try {
-        const transcript = await invoke<TranscriptResult>(
-          "transcribe_recording",
-          { path },
-        );
-        recordings = recordings.map((r) =>
-          r.id === id ? { ...r, status: "done", transcript } : r,
-        );
-      } catch (e) {
-        recordings = recordings.map((r) =>
-          r.id === id ? { ...r, status: "error", error: String(e) } : r,
-        );
+        await invoke("transcribe_recording", { path });
+      } finally {
+        isTranscribing = false;
       }
     } catch (e) {
       isRecording = false;
@@ -102,39 +89,71 @@ function handleSettingsSaved(_s: SttSettings) {
 }
 </script>
 
-<div class="flex h-screen flex-col items-center gap-8 overflow-y-auto px-6 pt-6 pb-18 box-border">
-  <main class="flex flex-1 flex-col items-center justify-center gap-6 text-center">
-    <button
-      class={`h-30 w-30 cursor-pointer rounded-full border-none text-base font-bold text-brand-cream transition-[background,box-shadow,transform] duration-200 active:scale-[0.96] ${
-        isRecording
-          ? "animate-[pulse-rec_1.5s_ease-in-out_infinite] bg-brand-lightest shadow-[0_4px_16px_rgba(210,52,52,0.4)]"
-          : "bg-brand-lighter shadow-[0_4px_16px_rgba(171,43,41,0.4)] hover:bg-brand-lightest"
-      }`}
-      onclick={handleRecord}
-      aria-label={isRecording ? "Stop recording" : "Start recording"}
+<div
+  class="flex h-screen flex-col items-center gap-8 overflow-y-auto px-6 pt-6 pb-18 box-border"
+>
+  <button
+    class="fixed right-4 top-4 z-10 cursor-pointer rounded-full bg-brand-darker/85 p-2 shadow-[0_2px_12px_rgba(0,0,0,0.3)] backdrop-blur-sm transition-all hover:bg-brand-cream hover:text-brand-darker"
+    onclick={() => {
+      view = "list";
+    }}
+    title="Registrazioni"
+    aria-label="Vai alle registrazioni"
+  >
+    <List size={16} />
+  </button>
+
+  {#if view === "record"}
+    <main
+      class="flex flex-1 flex-col items-center justify-center gap-6 text-center"
     >
-      {isRecording ? "■ STOP" : "⬤ REC"}
-    </button>
+      <button
+        class={`h-30 w-30 cursor-pointer rounded-full border-none text-base font-bold text-brand-cream transition-[background,box-shadow,transform] duration-200 active:scale-[0.96] ${
+          isRecording
+            ? "animate-[pulse-rec_1.5s_ease-in-out_infinite] bg-brand-lightest shadow-[0_4px_16px_rgba(210,52,52,0.4)]"
+            : "bg-brand-lighter shadow-[0_4px_16px_rgba(171,43,41,0.4)] hover:bg-brand-lightest"
+        }`}
+        onclick={handleRecord}
+        aria-label={isRecording ? "Stop recording" : "Start recording"}
+      >
+        {isRecording ? "■ STOP" : "⬤ REC"}
+      </button>
 
-    {#if isRecording}
-      <p class="m-0 font-mono text-2xl font-semibold text-brand-lightest">
-        {formatDuration(durationMs)}
-      </p>
-    {/if}
-    {#if error}
-      <p class="m-0 max-w-95 text-[0.85rem] text-red-400">{error}</p>
-    {/if}
-  </main>
-
-  {#if recordings.length > 0}
-    <section class="flex w-full max-w-170 flex-col gap-4">
-      <h2 class="m-0 mb-1 text-xs font-semibold tracking-wider text-brand-cream/50 uppercase">
-        Registrazioni
-      </h2>
-      {#each recordings as rec (rec.id)}
-        <RecordingItem {rec} />
-      {/each}
-    </section>
+      {#if isRecording}
+        <p class="m-0 font-mono text-2xl font-semibold text-brand-lightest">
+          {formatDuration(durationMs)}
+        </p>
+      {/if}
+      {#if isTranscribing}
+        <p class="m-0 animate-pulse text-xs text-brand-cream/50">
+          Trascrizione in corso...
+        </p>
+      {/if}
+      {#if error}
+        <p class="m-0 max-w-95 text-[0.85rem] text-red-400">{error}</p>
+      {/if}
+    </main>
+  {:else if view === "list"}
+    <main class="flex w-full flex-1 flex-col items-start gap-6 px-6 pt-6">
+      <RecordsList
+        onSelect={(e) => {
+          selectedEntry = e;
+          view = "detail";
+        }}
+        onBack={() => {
+          view = "record";
+        }}
+      />
+    </main>
+  {:else if view === "detail" && selectedEntry}
+    <main class="flex w-full flex-1 flex-col items-start gap-6 px-6 pt-6">
+      <RecordingDetail
+        entry={selectedEntry}
+        onBack={() => {
+          view = "list";
+        }}
+      />
+    </main>
   {/if}
 
   <SttIndicator status={sttStatus} onSettingsClick={() => (showSettings = true)} />

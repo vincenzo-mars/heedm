@@ -82,11 +82,11 @@ distinguere: mic e sistema sono due sorgenti separate, ma ciascuna può comunque
 contenere più persone (es. una chiamata multi-partecipante lato sistema viene
 etichettata come un unico "sistema").
 
-### Sidecar `<nome registrazione>.diarization.json`
+### Sidecar `recording.diarization.json`
 `stop_recording` (in `commands.rs`) chiama `estimate_timeline` sui buffer grezzi
 **prima** di passarli a `mixer::mix` — una volta fusi in un'unica traccia mono
-l'informazione "chi" è persa — e scrive il risultato come JSON accanto al WAV
-(stesso nome, estensione sostituita con `.diarization.json`).
+l'informazione "chi" è persa — e scrive il risultato come JSON nella cartella
+della registrazione come `recording.diarization.json` (stessa cartella di `recording.wav`).
 
 Scritto solo se la cattura audio di sistema era attiva (`sys_capture.is_some()`):
 senza una seconda sorgente il timeline sarebbe banalmente sempre "mic". È
@@ -95,6 +95,16 @@ non fa fallire la registrazione (il WAV è già su disco a quel punto).
 
 `transcribe_recording` (vedi [`docs/backend/stt.md`](stt.md)) carica questo sidecar
 se presente e lo usa per popolare `TranscriptSegment.speaker`.
+
+### Struttura cartella per registrazione
+
+```
+Records/
+  └── YYYY-MM-DD HH.MM.SS/
+       ├── recording.wav
+       ├── recording.diarization.json   (solo se audio di sistema attivo)
+       └── transcript.json              (scritto da transcribe_recording, best-effort)
+```
 
 ---
 

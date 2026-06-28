@@ -30,6 +30,7 @@ pub fn run() {
             commands::check_screen_recording_permission,
             commands::request_screen_recording_permission,
             commands::open_permission_settings,
+            commands::list_recordings,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

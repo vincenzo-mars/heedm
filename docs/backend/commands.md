@@ -8,14 +8,25 @@ Registrati in: `src-tauri/src/lib.rs`
 | Command | Input | Output | Side effects |
 |---|---|---|---|
 | `start_recording` | — | `Result<(), String>` | Avvia stream cpal mic + SCStream sistema, popola buffer |
-| `stop_recording` | — | `Result<String, String>` | Ferma stream, mix, scrive WAV in `recordings_dir/Registrazione <timestamp leggibile>.wav`; se l'audio di sistema era attivo, stima e scrive anche il sidecar `<stesso nome>.diarization.json` (best-effort, vedi `docs/backend/recorder.md`); ritorna path WAV |
+| `stop_recording` | — | `Result<String, String>` | Ferma stream, mix, crea cartella `recordings_dir/YYYY-MM-DD HH.MM.SS/`, scrive WAV come `recording.wav`; se l'audio di sistema era attivo, stima e scrive anche `recording.diarization.json` nella stessa cartella (best-effort, vedi `docs/backend/recorder.md`); ritorna path WAV |
 | `get_recording_status` | — | `Result<RecordingStatus, String>` | — |
+| `list_recordings` | — | `Result<Vec<RecordingEntry>, String>` | Scansiona `recordings_dir`, legge `transcript.json` da ogni sottocartella se presente; ordine cronologico inverso |
 
 ### `RecordingStatus`
 ```rust
 pub struct RecordingStatus {
     pub is_recording: bool,
     pub duration_ms: u64,
+}
+```
+
+### `RecordingEntry`
+```rust
+pub struct RecordingEntry {
+    pub folder_path: String,  // path assoluto cartella (es. .../Records/2024-06-28 14.30.45)
+    pub name: String,         // nome cartella = timestamp
+    pub wav_path: String,     // path assoluto recording.wav
+    pub transcript: Option<TranscriptResult>,
 }
 ```
 
@@ -60,7 +71,7 @@ la CTA per aprire il pannello di sistema (vedi `docs/frontend/ui.md`).
 
 | Command | Input | Output | Side effects |
 |---|---|---|---|
-| `transcribe_recording` | `path: String` | `Result<TranscriptResult, String>` | Legge WAV, converte in memoria a 16kHz/mono/16-bit (`prepare_for_whisper`), POST `/inference` a whisper-server, poi — se esiste un sidecar `.diarization.json` accanto al WAV — popola `TranscriptSegment.speaker` per sovrapposizione temporale (vedi `docs/backend/stt.md` → Diarizzazione) |
+| `transcribe_recording` | `path: String` | `Result<TranscriptResult, String>` | Legge WAV, converte in memoria a 16kHz/mono/16-bit (`prepare_for_whisper`), POST `/inference` a whisper-server, poi — se esiste un sidecar `recording.diarization.json` nella stessa cartella — popola `TranscriptSegment.speaker` per sovrapposizione temporale (vedi `docs/backend/stt.md` → Diarizzazione); scrive `transcript.json` nella cartella del WAV (best-effort, `.ok()`) |
 
 ## Eventi emessi (Rust → Frontend)
 

@@ -13,6 +13,27 @@ Formato:
 
 ---
 
+## 2026-06-28 — Folder-per-recording + Records view
+
+**Obiettivo:** struttura a cartella per registrazione, persistenza trascrizione su disco, UI separata per sfogliare i record storici.
+
+**Fatto:**
+- `stop_recording` ora crea `records_dir/YYYY-MM-DD HH.MM.SS/` e salva `recording.wav` dentro (prima: file piatto con nome lungo)
+- `transcribe_recording` scrive `transcript.json` nella cartella del WAV a fine trascrizione (best-effort, `.ok()`)
+- Il sidecar diarizzazione segue automaticamente: `recording.diarization.json` nella stessa cartella
+- Nuovo comando `list_recordings`: scansiona le sottocartelle, carica `transcript.json` se presente, ordine cronologico inverso
+- Nuovo `RecordsList.svelte`: vista elenco con badge "trascritto"/"in attesa"
+- Nuovo `RecordingDetail.svelte`: vista dettaglio con `TranscriptView` + "Apri cartella" via plugin opener
+- `App.svelte`: state `view` a 3 vie (`record|list|detail`), bottone navigazione lista (fixed top-right), rimosso array in-memory `recordings` e componente `RecordingItem`
+
+**Decisioni:**
+- WAV si chiama `recording.wav` (non il timestamp completo): la cartella ha già il timestamp nel nome
+- `transcript.json` best-effort: un errore di scrittura non fa fallire la trascrizione (già in memoria per il frontend)
+- Array `Recording[]` in-memory rimosso: la fonte di verità è ora il filesystem; `list_recordings` carica al mount della lista
+- `RecordingItem.svelte` eliminato: sostituito da `RecordsList` + `RecordingDetail`
+
+---
+
 ## 2026-06-15 — Integrazione shadcn-svelte
 
 **Obiettivo:** introdurre shadcn-svelte come libreria di componenti UI primitivi, mantenendo la palette brand esistente.

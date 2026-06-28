@@ -434,6 +434,13 @@ pub async fn transcribe_recording(
         }
     }
 
+    let wav_path_buf = PathBuf::from(&path);
+    if let Some(folder) = wav_path_buf.parent() {
+        if let Ok(json) = serde_json::to_vec(&result) {
+            tokio::fs::write(folder.join("transcript.json"), json).await.ok();
+        }
+    }
+
     Ok(result)
 }
 
@@ -470,6 +477,14 @@ fn dominant_speaker(
 pub struct RecordingStatus {
     pub is_recording: bool,
     pub duration_ms: u64,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct RecordingEntry {
+    pub folder_path: String,
+    pub name: String,
+    pub wav_path: String,
+    pub transcript: Option<TranscriptResult>,
 }
 
 #[tauri::command]
@@ -550,8 +565,12 @@ pub async fn stop_recording(
         .await
         .map_err(|e| e.to_string())?;
 
-    let timestamp = chrono::Local::now().format("%Y-%m-%d %H.%M.%S");
-    let path = dir.join(format!("Registrazione {timestamp}.wav"));
+    let timestamp = chrono::Local::now().format("%Y-%m-%d %H.%M.%S").to_string();
+    let folder = dir.join(&timestamp);
+    tokio::fs::create_dir_all(&folder)
+        .await
+        .map_err(|e| e.to_string())?;
+    let path = folder.join("recording.wav");
 
     writer::write_wav(&mixed, &path, sample_rate, channels)?;
 
@@ -584,4 +603,51 @@ pub async fn get_recording_status(
             .map(|t| t.elapsed().as_millis() as u64)
             .unwrap_or(0),
     })
+}
+
+#[tauri::command]
+pub async fn list_recordings(app: AppHandle) -> Result<Vec<RecordingEntry>, String> {
+    let settings = get_stt_settings(app.clone()).await;
+    let dir = recordings_dir(&app, &settings);
+
+    if !dir.exists() {
+        return Ok(vec![]);
+    }
+
+    let mut read_dir = tokio::fs::read_dir(&dir).await.map_err(|e| e.to_string())?;
+    let mut result = Vec::new();
+
+    while let Some(entry) = read_dir.next_entry().await.map_err(|e| e.to_string())? {
+        let folder = entry.path();
+        if !folder.is_dir() {
+            continue;
+        }
+        let wav_path = folder.join("recording.wav");
+        if !wav_path.exists() {
+            continue;
+        }
+        let name = folder
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_string();
+        let transcript_path = folder.join("transcript.json");
+        let transcript = if transcript_path.exists() {
+            tokio::fs::read(&transcript_path)
+                .await
+                .ok()
+                .and_then(|b| serde_json::from_slice(&b).ok())
+        } else {
+            None
+        };
+        result.push(RecordingEntry {
+            folder_path: folder.to_string_lossy().into_owned(),
+            name,
+            wav_path: wav_path.to_string_lossy().into_owned(),
+            transcript,
+        });
+    }
+
+    result.sort_by(|a, b| b.name.cmp(&a.name));
+    Ok(result)
 }

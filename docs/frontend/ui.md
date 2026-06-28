@@ -76,14 +76,18 @@ State (`$state`):
 | `isRecording` | `boolean` | Flag registrazione attiva |
 | `durationMs` | `number` | Durata corrente in ms (polling ogni 500ms) |
 | `error` | `string \| null` | Errore da mostrare |
-| `recordings` | `Recording[]` | Lista registrazioni della sessione |
+| `isTranscribing` | `boolean` | Trascrizione in corso (feedback visivo) |
 | `sttStatus` | `SttStatus` | Stato server STT |
 | `showSettings` | `boolean` | Visibilità modal impostazioni |
+| `view` | `"record" \| "list" \| "detail"` | Vista corrente |
+| `selectedEntry` | `RecordingEntry \| null` | Registrazione selezionata per la vista dettaglio |
 
 Flusso principale:
 1. Mount → `get_stt_settings` → se non configurato apre SettingsPanel → `ensureServer()`
 2. REC click → `start_recording` → polling `get_recording_status` ogni 500ms
-3. STOP click → `stop_recording` → riceve path WAV → aggiunge Recording con status `"transcribing"` → `transcribe_recording` → status `"done"` o `"error"`
+3. STOP click → `stop_recording` → path WAV → `transcribe_recording` (backend salva `transcript.json`)
+4. Bottone lista (fixed top-right, icona `List`) → `view = "list"` → `RecordsList`
+5. Click su entry → `view = "detail"` → `RecordingDetail`
 
 ### `SttIndicator` — `src/lib/SttIndicator.svelte`
 
@@ -122,15 +126,13 @@ Logica:
 - Durante download: progress bar singolo step (modello), label percentuale; errore propagato (`throw`, non più `alert`) — risale a chi chiama `startDownload`
 - Save → `save_stt_settings` → `onSaved(settings)` → chiude modal → `ensureServer()`
 
-### `RecordingItem` — `src/lib/RecordingItem.svelte`
+### `RecordsList` — `src/lib/RecordsList.svelte`
 
-Card per una singola registrazione.
+Vista elenco registrazioni. On mount chiama `list_recordings`, mostra ogni entry come pulsante con nome (timestamp cartella) + badge "trascritto"/"in attesa". Click → `onSelect(entry)`. Props: `onSelect`, `onBack`.
 
-| Status | UI |
-|---|---|
-| `transcribing` | Badge animato + skeleton lines |
-| `done` | Badge verde + `TranscriptView` |
-| `error` | Badge rosso + messaggio errore |
+### `RecordingDetail` — `src/lib/RecordingDetail.svelte`
+
+Vista dettaglio singola registrazione. Header con back button + nome + "Apri cartella" (`revealItemInDir(entry.folder_path)` via `@tauri-apps/plugin-opener`). Se `entry.transcript` presente: `TranscriptView`. Altrimenti: placeholder. Props: `entry: RecordingEntry`, `onBack`.
 
 ### `TranscriptView` — `src/lib/TranscriptView.svelte`
 
@@ -157,13 +159,11 @@ interface SttSettings {
   recordingsDir: string | null; // null = default (document_dir/Heedm)
 }
 
-interface Recording {
-  id: string;
-  path: string;
-  filename: string;
-  status: "transcribing" | "done" | "error";
-  transcript?: TranscriptResult;
-  error?: string;
+interface RecordingEntry {
+  folder_path: string;          // path assoluto cartella registrazione
+  name: string;                 // nome cartella = timestamp (es. "2024-06-28 14.30.45")
+  wav_path: string;             // path assoluto recording.wav
+  transcript: TranscriptResult | null;
 }
 
 type SttStatus = "checking" | "starting" | "running" | "error";
