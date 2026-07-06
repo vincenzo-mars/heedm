@@ -50,6 +50,30 @@ docs/
     ui.md                        # componenti Svelte
 ```
 
+## Comandi
+
+- Dev: `source ~/.cargo/env && npm run tauri dev` — richiede `src-tauri/binaries/whisper-server` (se manca: `bash scripts/build-whisper-server.sh`)
+- Lint/format: `npm run lint:fix` (biome)
+- Typecheck FE: `npx svelte-check --tsconfig ./tsconfig.json`
+- Avvio app, screenshot, whisper-server, smoke test STT: skill `run-heedm`
+
+## Commit
+
+- Messaggi in inglese, conventional style (`feat:`, `fix:`, ...), niente trailer `Co-Authored-By`
+- Il pre-commit hook esegue `biome check --staged`: lancia `npm run lint:fix` PRIMA di `git commit`, non dopo il fallimento
+- Flusso completo: comando `/commit`
+
+## Verifica (OBBLIGATORIA come i doc)
+
+- Una feature che tocca recording/STT non è finita finché lo smoke test record→transcribe non passa (skill `run-heedm`)
+- Modifiche UI: verifica con screenshot reale (skill `run-heedm`), non dichiarare "fatto" senza aver visto il render
+
+## Gotchas macOS
+
+- shadcn-svelte: alias `$lib` via `paths` nel tsconfig, MAI `baseUrl` (deprecato, rimosso in TS 7)
+- Screenshot/cattura da terminale richiedono permesso Screen Recording al terminale; UI scripting via osascript è negato su questa macchina — non tentarlo
+- Swift compat libs (setup solo-CLT): `.cargo/config.toml` con `-L /Library/Developer/CommandLineTools/usr/lib/swift/macosx`
+
 ## Convenzioni
 
 - Lingua: italiano per testo UI e messaggi utente; inglese per codice Rust/TS, nomi variabili, commenti tecnici
