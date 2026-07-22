@@ -13,6 +13,26 @@ Formato:
 
 ---
 
+## 2026-07-17 — Import file audio esterno da trascrivere
+
+**Obiettivo:** oltre a registrare, permettere di caricare un file audio già esistente (dal Finder) e trascriverlo con lo stesso flusso di una registrazione.
+
+**Fatto:**
+- Nuovo command `import_audio_file` (commands.rs): picker file → `decode_audio` (symphonia) → downmix mono + `resample_linear` a 16kHz → scrive `recording.wav` in nuova cartella Records → ritorna path. Output identico a `stop_recording`, così l'entry riusa Records + `transcribe_recording` senza rami nuovi
+- `App.svelte`: link "o carica un file" sotto il bottone REC (solo a riposo) → import → transcribe → `view = "list"`
+- `Cargo.toml`: aggiunto `symphonia` (features mp3/aac/isomp4/flac/vorbis/ogg/pcm/wav)
+
+**Decisioni:**
+- **symphonia, non ffmpeg:** decoder Rust puro, coerente con la scelta già fatta per il resample (`resample_linear`, niente ffmpeg/rubato). Zero binari esterni da bundle
+- **Decode a monte, non a valle:** `import` scrive già un WAV 16kHz canonico invece di passare il file grezzo a `transcribe_recording` (che via `prepare_for_whisper`/hound legge solo WAV). Così `list_recordings` e la trascrizione restano invariati
+- Nessun sidecar diarizzazione: sorgente singola → `speaker = None` (già gestito)
+
+**Ceiling:** mp4/m4a = solo traccia audio AAC. Codec esotici / file corrotti → errore propagato alla UI.
+
+**Prossimi passi:** —
+
+---
+
 ## 2026-06-28 — AEC: rimozione echo acustico dal microfono
 
 **Obiettivo:** quando l'utente usa le casse del Mac, l'audio di sistema (colleghi) veniva ripreso dal microfono causando diarizzazione errata (tutto "both") e overlapping fasullo in trascrizione.

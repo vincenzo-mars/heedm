@@ -56,6 +56,24 @@ $effect(() => {
   return () => clearInterval(id);
 });
 
+async function handleImport() {
+  error = null;
+  if (isRecording || isTranscribing) return;
+  try {
+    const path = await invoke<string | null>("import_audio_file");
+    if (!path) return;
+    isTranscribing = true;
+    try {
+      await invoke("transcribe_recording", { path });
+      view = "list";
+    } finally {
+      isTranscribing = false;
+    }
+  } catch (e) {
+    error = String(e);
+  }
+}
+
 async function handleRecord() {
   error = null;
   if (!isRecording) {
@@ -118,6 +136,16 @@ function handleSettingsSaved(_s: SttSettings) {
       >
         {isRecording ? "■ STOP" : "⬤ REC"}
       </button>
+
+      {#if !isRecording}
+        <button
+          class="cursor-pointer border-none bg-transparent text-sm text-brand-cream/70 underline underline-offset-4 transition-colors hover:text-brand-cream disabled:cursor-default disabled:opacity-50"
+          onclick={handleImport}
+          disabled={isTranscribing}
+        >
+          o carica un file
+        </button>
+      {/if}
 
       {#if isRecording}
         <p class="m-0 font-mono text-2xl font-semibold text-brand-lightest">

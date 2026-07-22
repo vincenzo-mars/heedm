@@ -25,6 +25,7 @@ pub fn run() {
             commands::get_local_model_path,
             commands::get_recordings_dir,
             commands::pick_directory,
+            commands::import_audio_file,
             commands::download_local_model,
             commands::start_local_server,
             commands::check_screen_recording_permission,

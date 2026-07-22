@@ -24,6 +24,7 @@ cpal = "0.17"
 hound = "3.5"
 reqwest = { version = "0.12", features = ["multipart", "json", "stream"] }
 futures-util = "0.3"
+symphonia = { version = "0.5", features = ["mp3", "aac", "isomp4", "flac", "vorbis", "ogg", "pcm", "wav"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 screencapturekit = "7"

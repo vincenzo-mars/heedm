@@ -60,6 +60,16 @@
        TranscriptView — gruppi per speakerInfo() (Tu/Sistema/Sovrapposti/...)
 ```
 
+### Entry point alternativo: import file esterno
+
+`import_audio_file` è una seconda sorgente per lo stesso pipeline. Invece di
+mic+sistema, decodifica un file audio scelto dall'utente (symphonia: wav/mp3/
+m4a/mp4/flac/ogg) in campioni f32, li porta a mono 16kHz (downmix + lo stesso
+`resample_linear` del ramo mic) e scrive `recording.wav` in una nuova cartella
+Records — da lì il flusso è identico a una registrazione (`transcribe_recording`
+→ whisper-server → `transcript.json`). Nessun ramo diarizzazione: sorgente
+singola, `speaker = None`.
+
 ## Componenti principali
 
 | Layer | Tecnologia | Ruolo |
@@ -88,6 +98,7 @@
 | cpal | 0.17 | Audio I/O cross-platform |
 | screencapturekit | 7.x | System audio macOS |
 | hound | 3.x | WAV encoding |
+| symphonia | 0.5 | Decode file audio importati (mp3/m4a/mp4/flac/ogg) — Rust puro, no ffmpeg |
 | reqwest | 0.12 | HTTP client per whisper API |
 | tokio | 1.x | Async runtime |
 | zip | 2.x | Estrazione binary whisper |

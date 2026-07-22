@@ -86,6 +86,7 @@ Flusso principale:
 1. Mount → `get_stt_settings` → se non configurato apre SettingsPanel → `ensureServer()`
 2. REC click → `start_recording` → polling `get_recording_status` ogni 500ms
 3. STOP click → `stop_recording` → path WAV → `transcribe_recording` (backend salva `transcript.json`)
+3b. Link "o carica un file" (sotto il bottone REC, solo a riposo) → `import_audio_file` (picker + decode + WAV) → se path, `transcribe_recording` → `view = "list"`. Stesso flusso dello STOP, sorgente diversa
 4. Bottone lista (fixed top-right, icona `List`) → `view = "list"` → `RecordsList`
 5. Click su entry → `view = "detail"` → `RecordingDetail`
 

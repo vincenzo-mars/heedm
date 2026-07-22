@@ -145,6 +145,146 @@ pub async fn pick_directory(app: AppHandle) -> Option<String> {
     .flatten()
 }
 
+// ── Import ─────────────────────────────────────────────────────────────────────
+
+const AUDIO_EXTENSIONS: &[&str] = &["wav", "mp3", "m4a", "mp4", "flac", "ogg", "aac"];
+
+/// Decodifica un file audio arbitrario (wav/mp3/m4a/mp4/flac/ogg) in campioni f32
+/// interleaved via symphonia (Rust puro, niente ffmpeg — coerente con il resample
+/// puro-Rust già usato qui). Ritorna (samples, channels, sample_rate).
+fn decode_audio(path: &std::path::Path) -> Result<(Vec<f32>, u16, u32), String> {
+    use symphonia::core::audio::SampleBuffer;
+    use symphonia::core::codecs::DecoderOptions;
+    use symphonia::core::errors::Error as SymphoniaError;
+    use symphonia::core::formats::FormatOptions;
+    use symphonia::core::io::MediaSourceStream;
+    use symphonia::core::meta::MetadataOptions;
+    use symphonia::core::probe::Hint;
+
+    let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    let mss = MediaSourceStream::new(Box::new(file), Default::default());
+
+    let mut hint = Hint::new();
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        hint.with_extension(ext);
+    }
+
+    let probed = symphonia::default::get_probe()
+        .format(
+            &hint,
+            mss,
+            &FormatOptions::default(),
+            &MetadataOptions::default(),
+        )
+        .map_err(|e| format!("Formato audio non riconosciuto: {e}"))?;
+    let mut format = probed.format;
+
+    let track = format
+        .default_track()
+        .ok_or("Nessuna traccia audio nel file")?;
+    let track_id = track.id;
+    let sample_rate = track
+        .codec_params
+        .sample_rate
+        .ok_or("Sample rate mancante nel file audio")?;
+    let channels = track
+        .codec_params
+        .channels
+        .map(|c| c.count())
+        .unwrap_or(1) as u16;
+
+    let mut decoder = symphonia::default::get_codecs()
+        .make(&track.codec_params, &DecoderOptions::default())
+        .map_err(|e| e.to_string())?;
+
+    let mut samples: Vec<f32> = Vec::new();
+    loop {
+        let packet = match format.next_packet() {
+            Ok(p) => p,
+            // Fine stream: symphonia segnala EOF come IoError(UnexpectedEof).
+            Err(SymphoniaError::IoError(e))
+                if e.kind() == std::io::ErrorKind::UnexpectedEof =>
+            {
+                break
+            }
+            Err(e) => return Err(e.to_string()),
+        };
+        if packet.track_id() != track_id {
+            continue;
+        }
+        match decoder.decode(&packet) {
+            Ok(decoded) => {
+                let spec = *decoded.spec();
+                let mut buf = SampleBuffer::<f32>::new(decoded.capacity() as u64, spec);
+                buf.copy_interleaved_ref(decoded);
+                samples.extend_from_slice(buf.samples());
+            }
+            // Un pacchetto corrotto non deve abortire l'intero file.
+            Err(SymphoniaError::DecodeError(_)) => continue,
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+
+    if samples.is_empty() {
+        return Err("Il file audio non contiene campioni decodificabili".to_string());
+    }
+
+    Ok((samples, channels, sample_rate))
+}
+
+/// Importa un file audio esterno: apre il picker, decodifica, e lo salva come
+/// `recording.wav` (mono 16kHz 16-bit) in una nuova cartella — identico a ciò che
+/// produce `stop_recording`, così l'entry segue lo stesso flusso (Records +
+/// `transcribe_recording`). Ritorna il path del WAV, oppure `None` se annullato.
+#[tauri::command]
+pub async fn import_audio_file(app: AppHandle) -> Result<Option<String>, String> {
+    let picker_app = app.clone();
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        picker_app
+            .dialog()
+            .file()
+            .add_filter("Audio", AUDIO_EXTENSIONS)
+            .blocking_pick_file()
+            .and_then(|fp| fp.into_path().ok())
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let Some(src) = picked else {
+        return Ok(None);
+    };
+
+    let (samples, channels, sample_rate) = {
+        let src = src.clone();
+        tokio::task::spawn_blocking(move || decode_audio(&src))
+            .await
+            .map_err(|e| e.to_string())??
+    };
+
+    let mono: Vec<f32> = if channels <= 1 {
+        samples
+    } else {
+        samples
+            .chunks(channels as usize)
+            .map(|frame| frame.iter().sum::<f32>() / channels as f32)
+            .collect()
+    };
+    let mono16k = resample_linear(&mono, sample_rate, TARGET_SAMPLE_RATE);
+
+    let settings = get_stt_settings(app.clone()).await;
+    let dir = recordings_dir(&app, &settings);
+    let timestamp = chrono::Local::now().format("%Y-%m-%d %H.%M.%S").to_string();
+    let folder = dir.join(&timestamp);
+    tokio::fs::create_dir_all(&folder)
+        .await
+        .map_err(|e| e.to_string())?;
+    let path = folder.join("recording.wav");
+
+    writer::write_wav(&mono16k, &path, TARGET_SAMPLE_RATE, 1)?;
+
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
 // ── Download ──────────────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -655,4 +795,49 @@ pub async fn list_recordings(app: AppHandle) -> Result<Vec<RecordingEntry>, Stri
 
     result.sort_by(|a, b| b.name.cmp(&a.name));
     Ok(result)
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::*;
+    use std::process::Command;
+
+    /// Genera una fixture audio compressa con gli strumenti nativi macOS (come lo
+    /// smoke test STT del progetto), poi verifica che `decode_audio` la porti a
+    /// campioni f32 — copre il ramo rischioso nuovo (symphonia mp4/m4a/AAC), non
+    /// il WAV che hound già gestiva.
+    fn decode_fixture(afconvert_fmt: &str, ext: &str) -> (Vec<f32>, u16, u32) {
+        // Path unici per formato: i test girano in parallelo e condividere la
+        // fixture aiff causava collisioni di scrittura (afconvert errore -54).
+        let dir = std::env::temp_dir();
+        let aiff = dir.join(format!("heedm_decode_fix_{ext}.aiff"));
+        let out = dir.join(format!("heedm_decode_fix.{ext}"));
+        Command::new("say")
+            .args(["-v", "Alice", "-o"])
+            .arg(&aiff)
+            .arg("prova di decodifica audio")
+            .status()
+            .expect("say non disponibile");
+        Command::new("afconvert")
+            .args(["-f", afconvert_fmt, "-d", "aac"])
+            .arg(&aiff)
+            .arg(&out)
+            .status()
+            .expect("afconvert non disponibile");
+        decode_audio(&out).expect("decode_audio ha fallito")
+    }
+
+    #[test]
+    fn decodes_m4a_to_samples() {
+        let (samples, channels, rate) = decode_fixture("m4af", "m4a");
+        assert!(!samples.is_empty(), "nessun campione decodificato da m4a");
+        assert!(channels >= 1);
+        assert!(rate > 0);
+    }
+
+    #[test]
+    fn decodes_mp4_to_samples() {
+        let (samples, _, _) = decode_fixture("mp4f", "mp4");
+        assert!(!samples.is_empty(), "nessun campione decodificato da mp4");
+    }
 }

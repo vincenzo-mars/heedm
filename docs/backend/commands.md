@@ -12,6 +12,14 @@ Registrati in: `src-tauri/src/lib.rs`
 | `get_recording_status` | — | `Result<RecordingStatus, String>` | — |
 | `list_recordings` | — | `Result<Vec<RecordingEntry>, String>` | Scansiona `recordings_dir`, legge `transcript.json` da ogni sottocartella se presente; ordine cronologico inverso |
 
+## Import
+
+| Command | Input | Output | Side effects |
+|---|---|---|---|
+| `import_audio_file` | — | `Result<Option<String>, String>` | Apre il picker file (filtro `wav/mp3/m4a/mp4/flac/ogg/aac`), decodifica via symphonia, downmix mono + resample a 16kHz, scrive `recording.wav` in una nuova cartella `recordings_dir/YYYY-MM-DD HH.MM.SS/` (identico output a `stop_recording`, così l'entry segue lo stesso flusso Records/trascrizione); ritorna il path WAV, o `None` se annullato. Nessun sidecar diarizzazione (file singolo → speaker `None`) |
+
+Formati compressi decodificati con **symphonia** (Rust puro, niente ffmpeg — coerente col resample puro-Rust già usato in `prepare_for_whisper`). mp4/m4a = solo traccia audio AAC.
+
 ### `RecordingStatus`
 ```rust
 pub struct RecordingStatus {
