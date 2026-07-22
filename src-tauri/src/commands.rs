@@ -450,6 +450,11 @@ pub struct TranscriptResult {
     pub duration: f64,
     pub text: String,
     pub segments: Vec<TranscriptSegment>,
+    // Tempo di elaborazione della trascrizione (non presente nella risposta del
+    // server né nei transcript.json vecchi → `default` = None). Popolato da
+    // `transcribe_recording` e persistito nel sidecar.
+    #[serde(default)]
+    pub transcription_ms: Option<u64>,
 }
 
 /// Rate unico per registrazione *e* trascrizione: whisper.cpp richiede 16kHz
@@ -541,6 +546,7 @@ pub async fn transcribe_recording(
     path: String,
 ) -> Result<TranscriptResult, String> {
     let base_url = format!("http://127.0.0.1:{LOCAL_PORT}");
+    let started = std::time::Instant::now();
 
     let file_bytes = tokio::fs::read(&path).await.map_err(|e| e.to_string())?;
     let converted = tokio::task::spawn_blocking(move || prepare_for_whisper(&file_bytes))
@@ -566,6 +572,7 @@ pub async fn transcribe_recording(
         .map_err(|e| e.to_string())?;
 
     let mut result: TranscriptResult = resp.json().await.map_err(|e| e.to_string())?;
+    result.transcription_ms = Some(started.elapsed().as_millis() as u64);
 
     if let Some(timeline) = load_diarization_sidecar(&path).await {
         for segment in result.segments.iter_mut() {

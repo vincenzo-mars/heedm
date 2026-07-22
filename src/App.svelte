@@ -8,6 +8,7 @@ import SettingsPanel from "./lib/SettingsPanel.svelte";
 import SttIndicator from "./lib/SttIndicator.svelte";
 import {
   formatDuration,
+  formatElapsed,
   type RecordingEntry,
   type RecordingStatus,
   type SttSettings,
@@ -18,6 +19,7 @@ let isRecording = $state(false);
 let durationMs = $state(0);
 let error = $state<string | null>(null);
 let isTranscribing = $state(false);
+let transcribeMs = $state(0);
 let sttStatus = $state<SttStatus>("checking");
 let showSettings = $state(false);
 let view = $state<"record" | "list" | "detail">("record");
@@ -44,6 +46,16 @@ async function ensureServer() {
     sttStatus = "error";
   }
 }
+
+$effect(() => {
+  if (!isTranscribing) return;
+  const start = Date.now();
+  transcribeMs = 0;
+  const id = setInterval(() => {
+    transcribeMs = Date.now() - start;
+  }, 100);
+  return () => clearInterval(id);
+});
 
 $effect(() => {
   if (!isRecording) return;
@@ -154,7 +166,7 @@ function handleSettingsSaved(_s: SttSettings) {
       {/if}
       {#if isTranscribing}
         <p class="m-0 animate-pulse text-xs text-brand-cream/50">
-          Trascrizione in corso...
+          Trascrizione in corso... <span class="font-mono">{formatElapsed(transcribeMs)}</span>
         </p>
       {/if}
       {#if error}

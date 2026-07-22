@@ -71,11 +71,16 @@ Serializzata come JSON in `settings.json` (camelCase).
 pub struct TranscriptResult {
     pub task: String,
     pub language: String,
-    pub duration: f64,
+    pub duration: f64,             // durata audio (dal server)
     pub text: String,
     pub segments: Vec<TranscriptSegment>,
+    pub transcription_ms: Option<u64>,  // tempo di elaborazione, misurato da Heedm
 }
 ```
+`transcription_ms` non arriva dal server (`#[serde(default)]` → `None` in risposta
+e nei `transcript.json` vecchi): `transcribe_recording` misura il tempo dall'inizio
+alla ricezione della risposta e lo scrive nel `transcript.json`, così la lista
+registrazioni può mostrarlo anche a posteriori.
 
 ### `TranscriptSegment`
 ```rust

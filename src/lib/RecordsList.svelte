@@ -1,7 +1,7 @@
 <script lang="ts">
 import { invoke } from "@tauri-apps/api/core";
 import Button from "./Button.svelte";
-import type { RecordingEntry } from "./types";
+import { formatElapsed, type RecordingEntry } from "./types";
 
 let {
   onSelect,
@@ -46,14 +46,21 @@ $effect(() => {
         onclick={() => onSelect(entry)}
       >
         <span class="text-sm font-semibold text-brand-cream">{entry.name}</span>
-        <span
-          class={`whitespace-nowrap rounded-full px-2 py-0.5 text-[0.7rem] font-semibold ${
-            entry.transcript
-              ? "border border-green-800/60 bg-green-950/40 text-green-400"
-              : "border border-brand-cream/20 bg-transparent text-brand-cream/40"
-          }`}
-        >
-          {entry.transcript ? "trascritto" : "in attesa"}
+        <span class="flex items-center gap-2">
+          {#if entry.transcript?.transcription_ms != null}
+            <span class="whitespace-nowrap font-mono text-[0.7rem] text-brand-cream/40">
+              {formatElapsed(entry.transcript.transcription_ms)}
+            </span>
+          {/if}
+          <span
+            class={`whitespace-nowrap rounded-full px-2 py-0.5 text-[0.7rem] font-semibold ${
+              entry.transcript
+                ? "border border-green-800/60 bg-green-950/40 text-green-400"
+                : "border border-brand-cream/20 bg-transparent text-brand-cream/40"
+            }`}
+          >
+            {entry.transcript ? "trascritto" : "in attesa"}
+          </span>
         </span>
       </button>
     {/each}

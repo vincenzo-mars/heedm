@@ -31,6 +31,7 @@ export interface TranscriptResult {
   duration: number;
   text: string;
   segments: TranscriptSegment[];
+  transcription_ms: number | null;
 }
 
 export interface RecordingEntry {
@@ -69,6 +70,13 @@ export function formatSeconds(s: number): string {
   const m = Math.floor(s / 60);
   const sec = Math.floor(s % 60);
   return `${m}:${String(sec).padStart(2, "0")}`;
+}
+
+// Tempo di trascrizione: sotto il minuto mostra i secondi con un decimale
+// ("12.4s"), oltre passa a "m:ss" per restare leggibile.
+export function formatElapsed(ms: number): string {
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  return formatSeconds(ms / 1000);
 }
 
 export function groupSegments(segments: TranscriptSegment[]) {

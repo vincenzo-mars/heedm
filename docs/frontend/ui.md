@@ -87,6 +87,7 @@ Flusso principale:
 2. REC click → `start_recording` → polling `get_recording_status` ogni 500ms
 3. STOP click → `stop_recording` → path WAV → `transcribe_recording` (backend salva `transcript.json`)
 3b. Link "o carica un file" (sotto il bottone REC, solo a riposo) → `import_audio_file` (picker + decode + WAV) → se path, `transcribe_recording` → `view = "list"`. Stesso flusso dello STOP, sorgente diversa
+3c. Durante `isTranscribing` un timer live (`transcribeMs`, aggiornato ogni 100ms) mostra il tempo di trascrizione in corso. Il valore reale è misurato e persistito lato backend in `transcript.json` (`transcription_ms`)
 4. Bottone lista (fixed top-right, icona `List`) → `view = "list"` → `RecordsList`
 5. Click su entry → `view = "detail"` → `RecordingDetail`
 
@@ -138,7 +139,7 @@ Wrapper bottone con 2 varianti brand ripetute nell'app. Accetta tutte le `HTMLBu
 
 ### `RecordsList` — `src/lib/RecordsList.svelte`
 
-Vista elenco registrazioni. On mount chiama `list_recordings`, mostra ogni entry come pulsante con nome (timestamp cartella) + badge "trascritto"/"in attesa". Click → `onSelect(entry)`. Props: `onSelect`, `onBack`.
+Vista elenco registrazioni. On mount chiama `list_recordings`, mostra ogni entry come pulsante con nome (timestamp cartella) + badge "trascritto"/"in attesa". Se `transcript.transcription_ms` è presente, mostra accanto al badge il tempo impiegato per la trascrizione (`formatElapsed`). Click → `onSelect(entry)`. Props: `onSelect`, `onBack`.
 
 ### `RecordingDetail` — `src/lib/RecordingDetail.svelte`
 
@@ -185,5 +186,6 @@ type SttStatus = "checking" | "starting" | "running" | "error";
 |---|---|
 | `formatDuration(ms)` | `ms → "HH:MM:SS"` |
 | `formatSeconds(s)` | `s → "M:SS"` (per timestamp segmenti) |
+| `formatElapsed(ms)` | tempo di trascrizione: `"12.4s"` sotto il minuto, `"M:SS"` oltre |
 | `speakerInfo(speaker)` | Mappa chiave grezza speaker → `{ label, color }` (etichetta italiana + colore) |
 | `groupSegments(segments)` | Aggrega segmenti consecutivi con la stessa chiave speaker grezza |
