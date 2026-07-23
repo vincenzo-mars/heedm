@@ -53,10 +53,8 @@ docs/
 ## Convenzioni
 
 - Lingua: italiano per testo UI e messaggi utente; inglese per codice Rust/TS, nomi variabili, commenti tecnici
-- Commenti: solo quando il WHY non è ovvio da codice e nomi. Mai descrivere cosa fa il codice.
 - Nessun `unwrap()` senza gestione errore nel path principale
 - Errori: propagati come `Result<_, String>` verso il frontend
-- Nessun backwards-compatibility hack
 
 ## Regola documentazione (OBBLIGATORIA)
 
