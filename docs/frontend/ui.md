@@ -119,7 +119,7 @@ Logica:
 - Se `localReady`: mostra messaggio "Modello installato e pronto"
 - Altrimenti: mostra warning dimensioni
 
-Due sezioni "percorso", sola visualizzazione + reveal (niente più cambio cartella dalla UI — `pick_directory`/`changeModelDir`/`changeRecordingsDir` rimossi):
+Due sezioni "percorso", sola visualizzazione + reveal (niente più cambio cartella dalla UI — `changeModelDir`/`changeRecordingsDir` rimossi, e con loro il comando `pick_directory`):
 - **Modello locale**: titolo + icona `Folder` (mostrata solo se `modelPath` noto) → `revealModel`; sotto: messaggio stato (`localReady` → "Modello installato e pronto" verde, altrimenti warning dimensioni) → riquadro path `bg-brand-dark/50` con micro-label "Percorso" (`uppercase`/`tracking-wider`/`text-brand-cream/40`) sopra il path monospace → progress bar (durante download) → `[Scarica / Scarica di nuovo]` (bottone pieno `bg-brand-lighter`, label cambia in base a `localReady`, `disabled` durante download)
 - **Cartella registrazioni**: stesso pattern titolo + icona `Folder` → `revealRecordings`, riquadro path sotto
 

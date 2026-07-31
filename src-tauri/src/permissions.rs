@@ -6,17 +6,10 @@ mod macos {
     #[link(name = "CoreGraphics", kind = "framework")]
     unsafe extern "C" {
         fn CGPreflightScreenCaptureAccess() -> bool;
-        fn CGRequestScreenCaptureAccess() -> bool;
     }
 
     pub fn screen_recording_granted() -> bool {
         unsafe { CGPreflightScreenCaptureAccess() }
-    }
-
-    /// Innesca il prompt di sistema se lo stato non è ancora deciso; no-op se
-    /// già concesso/negato. Ritorna lo stato risultante.
-    pub fn request_screen_recording() -> bool {
-        unsafe { CGRequestScreenCaptureAccess() }
     }
 }
 
@@ -25,18 +18,10 @@ mod macos {
     pub fn screen_recording_granted() -> bool {
         true
     }
-
-    pub fn request_screen_recording() -> bool {
-        true
-    }
 }
 
 pub fn screen_recording_granted() -> bool {
     macos::screen_recording_granted()
-}
-
-pub fn request_screen_recording() -> bool {
-    macos::request_screen_recording()
 }
 
 pub enum PermissionPane {

@@ -44,18 +44,15 @@ pub struct RecordingEntry {
 |---|---|---|---|
 | `get_stt_settings` | — | `SttSettings` | Legge `settings.json`, ritorna default se assente |
 | `save_stt_settings` | `settings: SttSettings` | `Result<(), String>` | Scrive `settings.json` |
-| `get_local_model_status` | — | `bool` | Controlla esistenza file su disco |
 | `get_local_model_path` | — | `String` | Path assoluto del modello (rispetta `model_dir` se impostato); crea la cartella padre se assente |
 | `get_recordings_dir` | — | `String` | Path assoluto cartella registrazioni corrente (rispetta `recordings_dir` se impostato) |
-| `pick_directory` | — | `Option<String>` | Apre dialog "scegli cartella", `None` se annullato |
 
 ## STT — Download e server
 
 | Command | Input | Output | Side effects |
 |---|---|---|---|
 | `download_local_model` | — | `Result<(), String>` | Scarica il modello (binary già bundled nell'app), emette eventi `download-progress`, aggiorna settings |
-| `start_local_server` | — | `Result<(), String>` | Spawna whisper-server, attende fino a 60s |
-| `start_stt_server` | — | `Result<(), String>` | Alias di `start_local_server` |
+| `start_stt_server` | — | `Result<(), String>` | Spawna whisper-server via `start_local_server` (funzione interna, non esposta), attende fino a 60s |
 | `check_stt_server` | — | `String` | `"running"` o `"stopped"` |
 
 ## Permessi OS (macOS)
@@ -67,7 +64,6 @@ da macOS gli stub ritornano sempre stato "concesso"/no-op.
 | Command | Input | Output | Side effects |
 |---|---|---|---|
 | `check_screen_recording_permission` | — | `bool` | `CGPreflightScreenCaptureAccess` — sola lettura, nessun prompt |
-| `request_screen_recording_permission` | — | `bool` | `CGRequestScreenCaptureAccess` — innesca il prompt di sistema se lo stato non è ancora deciso, altrimenti no-op |
 | `open_permission_settings` | `pane: "microphone" \| "screen-recording"` | `Result<(), String>` | Apre il pannello Privacy & Security pertinente in System Settings via `open x-apple.systempreferences:...`; valore di `pane` non riconosciuto → `Err` (mai passato al comando di sistema) |
 
 Nota: per il microfono non esiste un check di stato — l'unica API è

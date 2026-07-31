@@ -108,12 +108,6 @@ pub async fn save_stt_settings(app: AppHandle, settings: SttSettings) -> Result<
 }
 
 #[tauri::command]
-pub async fn get_local_model_status(app: AppHandle) -> bool {
-    let settings = get_stt_settings(app.clone()).await;
-    local_model_path(&app, &settings).exists()
-}
-
-#[tauri::command]
 pub async fn get_local_model_path(app: AppHandle) -> String {
     let settings = get_stt_settings(app.clone()).await;
     let path = local_model_path(&app, &settings);
@@ -129,20 +123,6 @@ pub async fn get_recordings_dir(app: AppHandle) -> String {
     let dir = recordings_dir(&app, &settings);
     tokio::fs::create_dir_all(&dir).await.ok();
     dir.to_string_lossy().into_owned()
-}
-
-#[tauri::command]
-pub async fn pick_directory(app: AppHandle) -> Option<String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        app.dialog()
-            .file()
-            .blocking_pick_folder()
-            .and_then(|fp| fp.into_path().ok())
-            .map(|p| p.to_string_lossy().into_owned())
-    })
-    .await
-    .ok()
-    .flatten()
 }
 
 // ── Import ─────────────────────────────────────────────────────────────────────
@@ -349,8 +329,7 @@ impl WhisperServerState {
     }
 }
 
-#[tauri::command]
-pub async fn start_local_server(app: AppHandle) -> Result<(), String> {
+async fn start_local_server(app: AppHandle) -> Result<(), String> {
     if tokio::net::TcpStream::connect(format!("127.0.0.1:{LOCAL_PORT}"))
         .await
         .is_ok()
@@ -415,11 +394,6 @@ pub async fn start_stt_server(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub fn check_screen_recording_permission() -> bool {
     permissions::screen_recording_granted()
-}
-
-#[tauri::command]
-pub fn request_screen_recording_permission() -> bool {
-    permissions::request_screen_recording()
 }
 
 #[tauri::command]

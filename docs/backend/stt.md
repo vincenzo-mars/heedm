@@ -102,7 +102,6 @@ da Heedm stesso, vedi "Diarizzazione" più sotto.
 |---|---|---|
 | `get_local_model_path` | path assoluto del file modello | mostrato in UI; crea sempre la cartella padre (`models/`) se assente, così "Mostra nel Finder" funziona anche prima del download (rivela la cartella, non il file — che potrebbe non esistere ancora) |
 | `get_recordings_dir` | path assoluto cartella registrazioni corrente | mostrato in UI + "Mostra nel Finder" |
-| `pick_directory` | `Option<String>` (cartella scelta o `None` se annullato) | dialog `pick_folder`, riusato sia per modello che registrazioni |
 
 ## Flusso download (`download_local_model`)
 
@@ -114,7 +113,7 @@ Solo il modello viene scaricato — il binario `whisper-server` è già incluso 
 
 Gli eventi sono `"download-progress"` con payload `{ step: "model"|"done", pct: 0-100 }`.
 
-## Avvio server (`start_local_server`)
+## Avvio server (`start_stt_server`)
 
 1. Verifica se porta 8080 è già in ascolto → se sì, esce subito
 2. Risolve il binario bundled (`bundled_bin_path`) e controlla che il modello esista
