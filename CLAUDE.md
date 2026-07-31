@@ -18,10 +18,13 @@ src-tauri/src/
   main.rs                        # entry point Rust (boilerplate Tauri)
   lib.rs                         # setup app, registra tutti i commands
   commands.rs                    # Tauri commands esposti al frontend
+  permissions.rs                 # permessi OS (Screen Recording via CoreGraphics, pannelli System Settings)
   recorder/
     mod.rs                       # structs condivise (RecorderState, SysAudioStop)
     mic.rs                       # cattura microfono via cpal
     mixer.rs                     # mix mic + system audio
+    aec.rs                       # echo cancellation: toglie il system audio rientrato nel mic
+    diarization.rs               # timeline speaker (mic/sys/both) da energia dei due canali
     writer.rs                    # scrittura WAV con hound
     system_audio/
       mod.rs                     # routing platform-specific
@@ -35,10 +38,14 @@ src/
   App.css                        # stili
   lib/
     types.ts                     # tipi e helper condivisi
+    utils.ts                     # cn() (clsx + tailwind-merge)
+    Button.svelte                # bottone dell'app (varianti ghost/icon)
     SttIndicator.svelte          # indicatore stato server STT
     SettingsPanel.svelte         # modal impostazioni/download modello
-    RecordingItem.svelte         # card singola registrazione
+    RecordsList.svelte           # lista registrazioni
+    RecordingDetail.svelte       # dettaglio singola registrazione
     TranscriptView.svelte        # rendering trascrizione con speaker
+    components/ui/               # shadcn-svelte: base per componenti futuri, non ancora in uso
 
 docs/
   architecture.md                # flusso dati end-to-end
@@ -54,14 +61,16 @@ docs/
 
 - Dev: `source ~/.cargo/env && npm run tauri dev` — richiede `src-tauri/binaries/whisper-server` (se manca: `bash scripts/build-whisper-server.sh`)
 - Lint/format: `npm run lint:fix` (biome)
-- Typecheck FE: `npx svelte-check --tsconfig ./tsconfig.json`
+- Typecheck FE: `npm run typecheck`
+- Test Rust: `source ~/.cargo/env && cargo test --manifest-path src-tauri/Cargo.toml` — oggi non linka su questo setup (vedi Gotchas macOS): la verifica reale è `cargo check`
 - Avvio app, screenshot, whisper-server, smoke test STT: skill `run-heedm`
 
 ## Commit
 
-- Messaggi in inglese, conventional style (`feat:`, `fix:`, ...), niente trailer `Co-Authored-By`
+Estende le regole globali (skill `/commit`), non le ripete. Specifico di heedm:
+
 - Il pre-commit hook esegue `biome check --staged`: lancia `npm run lint:fix` PRIMA di `git commit`, non dopo il fallimento
-- Flusso completo: comando `/commit`
+- Un commit che tocca `src/` o `src-tauri/` deve includere il doc corrispondente (vedi Regola documentazione): l'hook `.claude/hooks/check-docs-updated.sh` lo impone, bypass `SKIP_DOCS=1`
 
 ## Verifica (OBBLIGATORIA come i doc)
 
@@ -73,6 +82,7 @@ docs/
 - shadcn-svelte: alias `$lib` via `paths` nel tsconfig, MAI `baseUrl` (deprecato, rimosso in TS 7)
 - Screenshot/cattura da terminale richiedono permesso Screen Recording al terminale; UI scripting via osascript è negato su questa macchina — non tentarlo
 - Swift compat libs (setup solo-CLT): `.cargo/config.toml` con `-L /Library/Developer/CommandLineTools/usr/lib/swift/macosx`
+- `cargo test` fallisce in fase di link (`__swift_FORCE_LOAD_$_swiftCompatibility56` undefined, via `apple_metal` di screencapturekit): il `-L` sopra basta a `cargo check`/`build` ma non al binario di test. Problema di ambiente, non di codice
 
 ## Convenzioni
 
@@ -89,6 +99,7 @@ Ogni volta che modifichi o aggiungi codice, aggiorna il doc corrispondente:
 | Modifica a... | Aggiorna... |
 |---|---|
 | `recorder/` (qualsiasi file) | `docs/backend/recorder.md` |
+| `permissions.rs` | `docs/backend/commands.md` |
 | `commands.rs` — sezione STT | `docs/backend/stt.md` |
 | `commands.rs` — sezione recording | `docs/backend/commands.md` |
 | `src/` (Svelte) | `docs/frontend/ui.md` |
