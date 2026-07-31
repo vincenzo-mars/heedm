@@ -59,6 +59,7 @@ docs/
 - Typecheck FE: `npm run typecheck`
 - Test Rust: `source ~/.cargo/env && cargo test --manifest-path src-tauri/Cargo.toml` — oggi non linka su questo setup (vedi Gotchas macOS): la verifica reale è `cargo check`
 - Avvio app, screenshot, whisper-server, smoke test STT: skill `run-heedm`
+- Test da utente nuovo (wipe totale + build release + install in /Applications): skill `fresh-install` (`bash scripts/fresh-install.sh`). DISTRUTTIVO: cancella modello, impostazioni, permessi OS e registrazioni
 
 ## Commit
 
@@ -70,6 +71,7 @@ Estende le regole globali (skill `/commit`), non le ripete. Specifico di heedm:
 ## Verifica (OBBLIGATORIA come i doc)
 
 - Una feature che tocca recording/STT non è finita finché lo smoke test record→transcribe non passa (skill `run-heedm`)
+- Una modifica a onboarding, permessi OS o download del modello va verificata da stato vergine (skill `fresh-install`): i permessi concessi in `tauri dev` appartengono a un'identità diversa da quella dell'app installata, quindi in dev quel flusso non lo vedi
 - Modifiche UI: verifica con screenshot reale (skill `run-heedm`), non dichiarare "fatto" senza aver visto il render
 
 ## Gotchas macOS

@@ -13,6 +13,27 @@ Formato:
 
 ---
 
+## 2026-07-31 — Skill `fresh-install`: test da stato vergine
+
+**Obiettivo:** poter provare l'app come la vede chi la installa per la prima volta, in modo ripetibile.
+
+**Fatto:**
+- `scripts/fresh-install.sh`: preflight, chiusura di app e orfani, wipe dello stato, reset permessi TCC, build release del solo `.app`, install in `/Applications`, lancio e checklist
+- `.claude/skills/fresh-install/SKILL.md`: quando usarla, cosa distrugge, e i punti del first-run che si sbagliano più facilmente
+- CLAUDE.md: la skill entra fra i comandi e fra le regole di verifica
+
+**Decisioni:**
+- **Wipe totale, modello incluso.** Il download da 1.5 GB con la sua progress bar è codice che può rompersi e fa parte del primo avvio: parcheggiare il modello avrebbe reso il test più veloce ma avrebbe saltato proprio quel pezzo
+- **Registrazioni cancellate, non archiviate.** Scelta esplicita dell'utente dopo che avevo proposto l'archiviazione. Il `rm -rf` è protetto da una guardia: se il path non corrisponde a `~/Documents/*/Records` lo script si ferma
+- **Script versionato + SKILL.md, non solo markdown.** La sequenza di wipe contiene l'unico `rm -rf` del repo: averla in un file leggibile in diff e lanciabile a mano vale i due file in più
+- **Solo il `.app`, niente `.dmg`** (`--bundles app`): il dmg allunga il build e per un test locale non serve
+
+**Ceiling:** i permessi concessi in `tauri dev` appartengono a un'identità di codice diversa dall'app in `/Applications`, quindi il flusso onboarding in dev non è osservabile. Da qui la skill.
+
+**Da verificare al primo giro reale:** il bundle non ha `signingIdentity`, quindi è firmato ad-hoc. Se la firma cambia a ogni rebuild, macOS può accumulare voci duplicate per Heedm in Privacy & Security. Lo script stampa `codesign -dv` dopo l'install per poterlo osservare.
+
+---
+
 ## 2026-07-31 — Diarizzazione delegata a whisper, doc collassati
 
 **Obiettivo:** terzo lotto. Smettere di reimplementare in Rust una diarizzazione che whisper.cpp fa già, e ridurre i doc da 5 file a 2.
