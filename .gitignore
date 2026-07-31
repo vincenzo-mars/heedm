@@ -23,5 +23,8 @@ dist-ssr
 *.sln
 *.sw?
 
-# Claude Code
-.claude/
+# Claude Code — la config di progetto (settings, hook, skill, comandi) è versionata,
+# solo lo stato locale e per-macchina resta fuori
+.claude/settings.local.json
+.claude/worktrees/
+.claude/*.lock
