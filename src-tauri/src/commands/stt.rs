@@ -1,6 +1,5 @@
 //! Modello locale, ciclo di vita di whisper-server e trascrizione.
 
-use std::io::Cursor;
 use std::path::PathBuf;
 
 use futures_util::StreamExt;
@@ -9,8 +8,6 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::AsyncWriteExt;
 
 use super::{bundled_bin_path, get_stt_settings, local_model_path, save_stt_settings, LOCAL_PORT};
-use crate::recorder::audio::{self, TARGET_SAMPLE_RATE};
-use crate::recorder::diarization;
 
 const MODEL_URL: &str =
     "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin";
@@ -102,6 +99,13 @@ async fn start_local_server(app: AppHandle) -> Result<(), String> {
         .to_str()
         .ok_or("Percorso del modello non rappresentabile come UTF-8")?;
 
+    // Flash attention e numero di thread non hanno UI: si deducono dalla
+    // macchina. `-fa` esiste solo dalle build recenti di whisper.cpp (vedi
+    // scripts/build-whisper-server.sh, tag pinnato).
+    let threads = std::thread::available_parallelism()
+        .map(|n| n.get().saturating_sub(2).max(1))
+        .unwrap_or(4);
+
     let child = tokio::process::Command::new(&bin)
         .args([
             "--model",
@@ -110,6 +114,9 @@ async fn start_local_server(app: AppHandle) -> Result<(), String> {
             "127.0.0.1",
             "--port",
             &LOCAL_PORT.to_string(),
+            "--threads",
+            &threads.to_string(),
+            "--flash-attn",
         ])
         .spawn()
         .map_err(|e| e.to_string())?;
@@ -168,32 +175,17 @@ pub struct TranscriptResult {
     pub transcription_ms: Option<u64>,
 }
 
-/// whisper.cpp's `read_wav` accetta solo mono 16kHz 16-bit PCM (`common.cpp`).
-/// Le registrazioni sono ora salvate direttamente a `TARGET_SAMPLE_RATE` — per i
-/// nuovi file questa conversione è un passthrough; resta necessaria solo per
-/// registrazioni legacy a rate nativo del mic.
-fn prepare_for_whisper(wav_bytes: &[u8]) -> Result<Vec<u8>, String> {
-    let mut reader = hound::WavReader::new(Cursor::new(wav_bytes)).map_err(|e| e.to_string())?;
-    let spec = reader.spec();
-
-    let samples: Vec<f32> = match spec.sample_format {
-        hound::SampleFormat::Float => reader
-            .samples::<f32>()
-            .collect::<Result<_, _>>()
-            .map_err(|e| e.to_string())?,
-        hound::SampleFormat::Int => {
-            let max = (1i64 << (spec.bits_per_sample - 1)) as f32;
-            reader
-                .samples::<i32>()
-                .map(|s| s.map(|v| v as f32 / max))
-                .collect::<Result<_, _>>()
-                .map_err(|e| e.to_string())?
-        }
-    };
-
-    let mono = audio::to_mono(samples, spec.channels);
-    let resampled = audio::resample_linear(&mono, spec.sample_rate, TARGET_SAMPLE_RATE);
-    audio::encode_wav(&resampled, TARGET_SAMPLE_RATE, 1)
+/// La diarizzazione la fa whisper: su un file **stereo** con `diarize=true`
+/// confronta l'energia dei due canali segmento per segmento e ritorna `"0"` per
+/// il sinistro (microfono) e `"1"` per il destro (audio di sistema), oppure
+/// `"?"` quando le due energie sono a meno del 10% l'una dall'altra.
+/// L'ambiguità non è una terza etichetta: viene normalizzata a `None`, lo stesso
+/// stato dei file mono (import, registrazioni senza audio di sistema).
+fn normalize_speaker(speaker: Option<String>) -> Option<String> {
+    match speaker.as_deref() {
+        Some("0") | Some("1") => speaker,
+        _ => None,
+    }
 }
 
 #[tauri::command]
@@ -201,12 +193,12 @@ pub async fn transcribe_recording(path: String) -> Result<TranscriptResult, Stri
     let base_url = format!("http://127.0.0.1:{LOCAL_PORT}");
     let started = std::time::Instant::now();
 
+    // I file prodotti da Heedm sono già nel formato che whisper.cpp richiede
+    // (16kHz 16-bit PCM), quindi vanno inviati così come sono: nessuna
+    // conversione intermedia, nessuna seconda copia in memoria.
     let file_bytes = tokio::fs::read(&path).await.map_err(|e| e.to_string())?;
-    let converted = tokio::task::spawn_blocking(move || prepare_for_whisper(&file_bytes))
-        .await
-        .map_err(|e| e.to_string())??;
 
-    let part = reqwest::multipart::Part::bytes(converted)
+    let part = reqwest::multipart::Part::bytes(file_bytes)
         .file_name("audio.wav")
         .mime_str("audio/wav")
         .map_err(|e| e.to_string())?;
@@ -214,7 +206,9 @@ pub async fn transcribe_recording(path: String) -> Result<TranscriptResult, Stri
     let form = reqwest::multipart::Form::new()
         .part("file", part)
         .text("language", "it")
-        .text("response_format", "verbose_json");
+        .text("response_format", "verbose_json")
+        // Ignorato dal server sui file mono, dove `pcmf32s` ha un solo canale.
+        .text("diarize", "true");
 
     let client = reqwest::Client::new();
     let resp = client
@@ -226,12 +220,8 @@ pub async fn transcribe_recording(path: String) -> Result<TranscriptResult, Stri
 
     let mut result: TranscriptResult = resp.json().await.map_err(|e| e.to_string())?;
     result.transcription_ms = Some(started.elapsed().as_millis() as u64);
-
-    if let Some(timeline) = load_diarization_sidecar(&path).await {
-        for segment in result.segments.iter_mut() {
-            segment.speaker = dominant_speaker(segment.start, segment.end, &timeline)
-                .map(|label| label.as_str().to_string());
-        }
+    for segment in result.segments.iter_mut() {
+        segment.speaker = normalize_speaker(segment.speaker.take());
     }
 
     let wav_path_buf = PathBuf::from(&path);
@@ -244,31 +234,4 @@ pub async fn transcribe_recording(path: String) -> Result<TranscriptResult, Stri
     }
 
     Ok(result)
-}
-
-/// Carica il sidecar `<nome registrazione>.diarization.json` scritto da `stop_recording`,
-/// se presente — registrazioni più vecchie o solo-microfono non ne hanno uno, e in tal
-/// caso `speaker` resta `None`.
-async fn load_diarization_sidecar(wav_path: &str) -> Option<Vec<diarization::SpeakerInterval>> {
-    let sidecar_path = PathBuf::from(wav_path).with_extension("diarization.json");
-    let bytes = tokio::fs::read(&sidecar_path).await.ok()?;
-    serde_json::from_slice(&bytes).ok()
-}
-
-/// Etichetta dominante: l'intervallo del timeline con la maggiore sovrapposizione
-/// temporale rispetto al segmento trascritto.
-fn dominant_speaker(
-    start: f64,
-    end: f64,
-    timeline: &[diarization::SpeakerInterval],
-) -> Option<diarization::SpeakerLabel> {
-    timeline
-        .iter()
-        .map(|interval| {
-            let overlap = (interval.end.min(end) - interval.start.max(start)).max(0.0);
-            (overlap, interval.label)
-        })
-        .filter(|(overlap, _)| *overlap > 0.0)
-        .max_by(|a, b| a.0.total_cmp(&b.0))
-        .map(|(_, label)| label)
 }

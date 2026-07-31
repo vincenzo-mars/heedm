@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
 # Compila whisper-server (whisper.cpp) come binario universale macOS (arm64 + x86_64)
 # e lo posiziona in src-tauri/binaries/whisper-server, da dove Tauri lo bundla
-# come risorsa dell'app (vedi tauri.conf.json → bundle.resources, docs/backend/stt.md).
+# come risorsa dell'app (vedi tauri.conf.json → bundle.resources, docs/architecture.md).
 #
 # Statico (BUILD_SHARED_LIBS=OFF) e con Metal (GGML_METAL=ON): nessuna dylib esterna
 # da bundlare, accelerazione GPU su Apple Silicon e Intel.
 #
 # Uso: ./scripts/build-whisper-server.sh [tag]
-#   tag = tag/branch whisper.cpp da compilare (default: v1.7.4)
+#   tag = tag/branch whisper.cpp da compilare (default: v1.9.1)
 #
 # Richiede: git, cmake, Xcode Command Line Tools (clang con supporto cross-arch macOS).
 
 set -euo pipefail
 
-WHISPER_TAG="${1:-v1.7.4}"
+WHISPER_TAG="${1:-v1.9.1}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT_DIR="$ROOT_DIR/src-tauri/binaries"
 WORK_DIR="$(mktemp -d)"

@@ -1,6 +1,5 @@
 pub mod aec;
 pub mod audio;
-pub mod diarization;
 pub mod mic;
 pub mod system_audio;
 

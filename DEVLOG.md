@@ -13,6 +13,34 @@ Formato:
 
 ---
 
+## 2026-07-31 — Diarizzazione delegata a whisper, doc collassati
+
+**Obiettivo:** terzo lotto. Smettere di reimplementare in Rust una diarizzazione che whisper.cpp fa già, e ridurre i doc da 5 file a 2.
+
+**Fatto:**
+- `stop_recording` scrive un WAV **stereo** quando c'è audio di sistema (mic a sinistra, sistema a destra) invece del mix mono. Senza audio di sistema resta mono
+- `transcribe_recording` passa `diarize=true` nel form: whisper riempie `segments[].speaker` con `"0"` (sinistra) e `"1"` (destra)
+- Cancellati `recorder/diarization.rs`, il sidecar `.diarization.json`, `load_diarization_sidecar`, `dominant_speaker` e `audio::mix` (sostituita da `interleave_stereo`)
+- Cancellata `prepare_for_whisper`: i file prodotti sono già nel formato che `read_wav` accetta, quindi i byte vanno diretti nel multipart. Sparisce anche `audio::encode_wav`, che esisteva solo per lei
+- Frontend: `SPEAKER_INFO` passa da `mic`/`sys`/`both` a `"0"`/`"1"`
+- `whisper-server` ricompilato a **v1.9.1** (era v1.7.4, dicembre 2024); avvio con `--flash-attn` e `--threads` dedotti dalla macchina
+- `docs/` collassata: `architecture.md` (backend, pipeline, whisper) e `reference.md` (comandi, tipi, componenti) al posto di 5 file. Da ~710 a 302 righe
+
+**Decisioni:**
+- **Delegare invece di mantenere.** `estimate_diarization_speaker` in `server.cpp` fa esattamente ciò che faceva `diarization.rs`: confronta l'energia dei due canali per segmento. Tenere due implementazioni della stessa euristica non ha senso
+- **Verificato prima di cancellare.** Costruito un WAV stereo con due voci distinte (`say` su canali separati) e inviato al server: il canale sinistro esce come `speaker: "0"`, il destro come `"1"`, e senza il campo `diarize` il campo `speaker` non compare. Solo dopo ho rimosso il codice Rust
+- **`"?"` non diventa una terza etichetta.** Quando le energie sono a meno del 10% l'una dall'altra whisper ritorna `"?"`: `normalize_speaker` lo riduce a `None`, cioè lo stesso stato dei file mono. Le etichette restano due, YOU e THEM
+- **Gli import restano mono.** I canali L/R di un file esterno non sono "io" e "gli altri": lasciarli separati produrrebbe etichette casuali
+- **L'AEC diventa load-bearing.** Prima influenzava solo la qualità audio, ora l'echo non cancellato falserebbe direttamente l'attribuzione degli speaker
+
+**Costo:** il WAV stereo pesa il doppio (64 KB/s invece di 32).
+
+**Verificato:** `cargo check` e `npm run typecheck` verdi; contratto HTTP della diarizzazione verificato end-to-end contro il server reale. Non verificato: una registrazione vera dal microfono, che richiede la GUI.
+
+**Prossimi passi:** VAD con il suo modello e i due interruttori in SettingsPanel, fix orfani whisper-server, upgrade delle 4 major Rust.
+
+---
+
 ## 2026-07-31 — Split di commands.rs e primitive audio condivise
 
 **Obiettivo:** secondo lotto della riduzione. Sciogliere il monolite `commands.rs` (824 righe, un terzo del codice) e togliere le duplicazioni nel Rust.

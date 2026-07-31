@@ -44,13 +44,12 @@ export type SttStatus = "checking" | "starting" | "running" | "error";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-// Diarizzazione "a 2 vie": il backend confronta l'energia di mic vs. audio di
-// sistema (vedi diarization.rs) — ogni segmento ricade in una di queste 3
-// etichette fisse, mai in un set arbitrario di speaker.
+// Diarizzazione "a 2 vie" fatta da whisper sul WAV stereo prodotto da
+// stop_recording: canale sinistro = microfono, destro = audio di sistema.
+// I segmenti ambigui arrivano già normalizzati a null dal backend.
 const SPEAKER_INFO: Record<string, { label: string; color: string }> = {
-  mic: { label: "YOU", color: "#3b82f6" },
-  sys: { label: "THEM", color: "#10b981" },
-  both: { label: "Sovrapposti", color: "#f59e0b" },
+  "0": { label: "YOU", color: "#3b82f6" },
+  "1": { label: "THEM", color: "#10b981" },
 };
 
 const UNKNOWN_SPEAKER = { label: "Sconosciuto", color: "#6b7280" };

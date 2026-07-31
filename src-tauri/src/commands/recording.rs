@@ -9,7 +9,7 @@ use tauri_plugin_dialog::DialogExt;
 use super::stt::TranscriptResult;
 use super::{get_stt_settings, recordings_dir};
 use crate::recorder::audio::{self, TARGET_SAMPLE_RATE};
-use crate::recorder::{aec, diarization, mic, system_audio, RecorderState};
+use crate::recorder::{aec, mic, system_audio, RecorderState};
 
 const AUDIO_EXTENSIONS: &[&str] = &["wav", "mp3", "m4a", "mp4", "flac", "ogg", "aac"];
 
@@ -199,7 +199,7 @@ pub async fn stop_recording(
     state: State<'_, RecorderState>,
     app: AppHandle,
 ) -> Result<String, String> {
-    let (mixed, sample_rate, timeline) = {
+    let (samples, sample_rate, channels) = {
         let mut inner = state.0.lock().await;
         if !inner.is_recording {
             return Err("Not recording".to_string());
@@ -225,37 +225,27 @@ pub async fn stop_recording(
         let mic = audio::to_mono(mic_raw, ch);
         let mic = audio::resample_linear(&mic, inner.mic_native_rate, sr);
 
-        // AEC: rimuove l'echo acustico di sys dal mic prima di diarizzazione e mix.
-        // Solo quando sys è attivo — senza audio di sistema non c'è echo da cancellare.
+        // AEC: rimuove dal mic l'echo acustico delle casse prima di scrivere il
+        // file. Non è solo qualità audio: senza, l'audio di sistema rientrato nel
+        // canale mic falserebbe il conto di energia con cui whisper attribuisce
+        // gli speaker.
         let mic = if had_sys_audio && !sys.is_empty() {
             aec::cancel_echo(&mic, &sys, sr)
         } else {
             mic
         };
 
-        // Solo se è stato catturato anche audio di sistema ha senso stimare un
-        // timeline mic-vs-sistema: senza una seconda sorgente sarebbe sempre "mic".
-        let timeline = had_sys_audio.then(|| diarization::estimate_timeline(&mic, &sys, sr));
-
-        (audio::mix(&mic, &sys), sr, timeline)
+        // Con audio di sistema il file è stereo (mic a sinistra, sistema a
+        // destra) così whisper può diarizzarlo da solo; senza, resta mono.
+        if had_sys_audio && !sys.is_empty() {
+            (audio::interleave_stereo(&mic, &sys), sr, 2)
+        } else {
+            (mic, sr, 1)
+        }
     };
 
     let path = new_recording_path(&app).await?;
-    audio::write_wav(&mixed, &path, sample_rate, 1)?;
-
-    // Sidecar best-effort: la diarizzazione è un arricchimento, non deve mai far
-    // fallire la registrazione (il file WAV è già scritto a questo punto).
-    if let Some(timeline) = timeline {
-        let sidecar_path = path.with_extension("diarization.json");
-        match serde_json::to_vec(&timeline) {
-            Ok(json) => {
-                if let Err(e) = tokio::fs::write(&sidecar_path, json).await {
-                    eprintln!("Impossibile scrivere sidecar diarizzazione: {e}");
-                }
-            }
-            Err(e) => eprintln!("Impossibile serializzare timeline diarizzazione: {e}"),
-        }
-    }
+    audio::write_wav(&samples, &path, sample_rate, channels)?;
 
     Ok(path.to_string_lossy().to_string())
 }

@@ -48,13 +48,8 @@ src/
     TranscriptView.svelte        # rendering trascrizione con speaker
 
 docs/
-  architecture.md                # flusso dati end-to-end
-  backend/
-    recorder.md                  # pipeline registrazione audio
-    stt.md                       # integrazione Whisper
-    commands.md                  # reference tutti i Tauri commands
-  frontend/
-    ui.md                        # componenti Svelte
+  architecture.md                # backend: flusso dati, pipeline audio, integrazione whisper
+  reference.md                   # superficie API: comandi Tauri, tipi, componenti Svelte
 ```
 
 ## Comandi
@@ -98,11 +93,9 @@ Ogni volta che modifichi o aggiungi codice, aggiorna il doc corrispondente:
 
 | Modifica a... | Aggiorna... |
 |---|---|
-| `recorder/` (qualsiasi file) | `docs/backend/recorder.md` |
-| `permissions.rs` | `docs/backend/commands.md` |
-| `commands/stt.rs` | `docs/backend/stt.md` |
-| `commands/mod.rs`, `commands/recording.rs` | `docs/backend/commands.md` |
-| `src/` (Svelte) | `docs/frontend/ui.md` |
+| `recorder/` (qualsiasi file) | `docs/architecture.md` |
+| `commands/` (qualsiasi file), `permissions.rs` | `docs/architecture.md` (come funziona) + `docs/reference.md` (firma del comando) |
+| `src/` (Svelte) | `docs/reference.md` |
 | flusso dati o dipendenze | `docs/architecture.md` |
 | decisione non ovvia o cambio architettura | aggiungi entry in `DEVLOG.md` |
 

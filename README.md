@@ -53,14 +53,9 @@ npm install
 npm run tauri dev
 ```
 
-Richiede il binario `whisper-server` compilato in `src-tauri/binaries/` — vedi `scripts/build-whisper-server.sh` e `docs/backend/stt.md` per i dettagli di build.
+Richiede il binario `whisper-server` compilato in `src-tauri/binaries/` — vedi `scripts/build-whisper-server.sh` e [`docs/architecture.md`](docs/architecture.md) per i dettagli di build.
 
 ## Documentazione
 
-Architettura e reference dettagliate in [`docs/`](docs/):
-
-- [`docs/architecture.md`](docs/architecture.md) — flusso dati end-to-end
-- [`docs/backend/recorder.md`](docs/backend/recorder.md) — pipeline registrazione audio
-- [`docs/backend/stt.md`](docs/backend/stt.md) — integrazione Whisper
-- [`docs/backend/commands.md`](docs/backend/commands.md) — reference comandi Tauri
-- [`docs/frontend/ui.md`](docs/frontend/ui.md) — componenti Svelte
+- [`docs/architecture.md`](docs/architecture.md) — flusso dati end-to-end, pipeline audio, integrazione whisper
+- [`docs/reference.md`](docs/reference.md) — comandi Tauri, tipi condivisi, componenti Svelte

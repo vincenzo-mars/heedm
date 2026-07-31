@@ -53,13 +53,16 @@ pub fn resample_linear(samples: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32
     out
 }
 
-pub fn mix(mic: &[f32], sys: &[f32]) -> Vec<f32> {
-    let len = mic.len().max(sys.len());
-    let mut out = Vec::with_capacity(len);
+/// Intreccia mic e audio di sistema in un buffer stereo (mic a sinistra, sistema
+/// a destra), zero-paddando il più corto. È il formato che permette a whisper di
+/// fare la diarizzazione da solo: con `diarize=true` confronta l'energia dei due
+/// canali e attribuisce ogni segmento a `"0"` (sinistra) o `"1"` (destra).
+pub fn interleave_stereo(left: &[f32], right: &[f32]) -> Vec<f32> {
+    let len = left.len().max(right.len());
+    let mut out = Vec::with_capacity(len * 2);
     for i in 0..len {
-        let m = mic.get(i).copied().unwrap_or(0.0);
-        let s = sys.get(i).copied().unwrap_or(0.0);
-        out.push((m + s).clamp(-1.0, 1.0));
+        out.push(left.get(i).copied().unwrap_or(0.0).clamp(-1.0, 1.0));
+        out.push(right.get(i).copied().unwrap_or(0.0).clamp(-1.0, 1.0));
     }
     out
 }
@@ -85,23 +88,4 @@ pub fn write_wav(
         writer.write_sample(to_i16(s)).map_err(|e| e.to_string())?;
     }
     writer.finalize().map_err(|e| e.to_string())
-}
-
-/// Scrive un WAV a 16 bit su un buffer in memoria invece che su file.
-pub fn encode_wav(samples: &[f32], sample_rate: u32, channels: u16) -> Result<Vec<u8>, String> {
-    let spec = WavSpec {
-        channels,
-        sample_rate,
-        bits_per_sample: 16,
-        sample_format: SampleFormat::Int,
-    };
-    let mut buf = std::io::Cursor::new(Vec::new());
-    {
-        let mut writer = WavWriter::new(&mut buf, spec).map_err(|e| e.to_string())?;
-        for &s in samples {
-            writer.write_sample(to_i16(s)).map_err(|e| e.to_string())?;
-        }
-        writer.finalize().map_err(|e| e.to_string())?;
-    }
-    Ok(buf.into_inner())
 }
