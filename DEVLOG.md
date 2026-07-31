@@ -13,6 +13,27 @@ Formato:
 
 ---
 
+## 2026-07-31 — Rimozione di shadcn-svelte
+
+**Obiettivo:** primo lotto del lavoro di riduzione della repo. Togliere lo stack shadcn-svelte, mai entrato in uso.
+
+**Fatto:**
+- Cancellati `src/lib/components/ui/button/` (`button.svelte` + `index.ts`) e `components.json`
+- `src/lib/utils.ts` ridotto al solo `cn()`: i tipi `WithoutChild`, `WithoutChildren`, `WithoutChildrenOrChild`, `WithElementRef` avevano come unico consumatore il button generato
+- `src/App.css`: via i due import (`tw-animate-css`, `shadcn-svelte/tailwind.css`), la `@custom-variant dark`, i ~40 token semantici nel `@theme`, i ~30 in `:root` e il `@keyframes shimmer` mai referenziato. Le regole `@layer base` che usavano `bg-background`/`text-foreground` ora usano direttamente `bg-brand-dark`/`text-brand-cream`
+- Rimosse le devDependencies `shadcn-svelte`, `tailwind-variants`, `tw-animate-css`
+
+**Decisioni:**
+- **Ribaltata la decisione del 2026-07-25** ("shadcn resta, è la base per i componenti futuri"): a un mese e mezzo dall'integrazione l'unico componente installato non è mai stato importato, mentre il bottone realmente in uso (`Button.svelte`, scritto a mano) è nato dopo. Tenere una libreria per componenti futuri che non arrivano costa 219 righe e 3 dipendenze
+- **La scala dei raggi resta**, ma come valori letterali (`--radius-lg/xl/2xl`) invece della catena `calc(var(--radius) * n)`: senza, ogni `rounded-lg` sarebbe passato da 0.625rem al default Tailwind di 0.5rem, cioè un cambio visivo non richiesto. Tenuti solo i tre gradini usati nel markup
+- **`* { @apply border-border outline-ring/50 }` eliminata senza sostituto**: nessuna utility `outline-*` o `ring-*` compare nel markup, e tutti i bordi dichiarano già il proprio colore
+
+**Verificato:** `npm run typecheck` (3765 file, 0 errori) e `npm run build` verdi.
+
+**Prossimi passi:** dedup Rust (`rms` duplicata, conversione f32→i16, downmix mono), split di `commands.rs` in tre moduli, delega della diarizzazione a whisper via WAV stereo.
+
+---
+
 ## 2026-07-25 — Riallineamento config Claude e pulizia superficie comandi
 
 **Obiettivo:** togliere dal repo config Claude non versionata, comandi Tauri morti e dipendenze sovradimensionate, dopo il giro di migliorie alla config globale.

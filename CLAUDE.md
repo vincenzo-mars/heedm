@@ -45,7 +45,6 @@ src/
     RecordsList.svelte           # lista registrazioni
     RecordingDetail.svelte       # dettaglio singola registrazione
     TranscriptView.svelte        # rendering trascrizione con speaker
-    components/ui/               # shadcn-svelte: base per componenti futuri, non ancora in uso
 
 docs/
   architecture.md                # flusso dati end-to-end
@@ -79,7 +78,7 @@ Estende le regole globali (skill `/commit`), non le ripete. Specifico di heedm:
 
 ## Gotchas macOS
 
-- shadcn-svelte: alias `$lib` via `paths` nel tsconfig, MAI `baseUrl` (deprecato, rimosso in TS 7)
+- Alias `$lib` via `paths` nel tsconfig, MAI `baseUrl` (deprecato, rimosso in TS 7)
 - Screenshot/cattura da terminale richiedono permesso Screen Recording al terminale; UI scripting via osascript è negato su questa macchina — non tentarlo
 - Swift compat libs (setup solo-CLT): `.cargo/config.toml` con `-L /Library/Developer/CommandLineTools/usr/lib/swift/macosx`
 - `cargo test` fallisce in fase di link (`__swift_FORCE_LOAD_$_swiftCompatibility56` undefined, via `apple_metal` di screencapturekit): il `-L` sopra basta a `cargo check`/`build` ma non al binario di test. Problema di ambiente, non di codice
