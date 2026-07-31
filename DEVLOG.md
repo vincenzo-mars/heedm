@@ -13,6 +13,31 @@ Formato:
 
 ---
 
+## 2026-07-25 — Riallineamento config Claude e pulizia superficie comandi
+
+**Obiettivo:** togliere dal repo config Claude non versionata, comandi Tauri morti e dipendenze sovradimensionate, dopo il giro di migliorie alla config globale.
+
+**Fatto:**
+- `.claude/` non è più gitignorata: `settings.json`, hook e skill `run-heedm` entrano in git. Fuori restano solo `settings.local.json` (permessi con path assoluti di questa macchina) e i `.lock` di runtime
+- Rimossi i due worktree in `.claude/worktrees/` (`chore/trim-claude-md`, `worktree-cleanup-ponytail-refs`): branch intatti in locale e su origin
+- Eliminato `.claude/commands/commit.md`: duplicava la skill globale `/commit`, che già legge la sezione `## Commit` del CLAUDE.md locale
+- `settings.json`: rimosso il campo `if` dall'hook (non è nello schema, veniva ignorato), allowlist estesa ai comandi di sessione (typecheck, cargo build/test/fmt/clippy, health whisper, pkill)
+- Rimossi 3 command morti (`pick_directory`, `get_local_model_status`, `request_screen_recording_permission`) e `start_local_server` declassato a funzione interna: il frontend usava solo il suo alias `start_stt_server`
+- `permissions.rs`: via anche `request_screen_recording` + la FFI `CGRequestScreenCaptureAccess`, senza più chiamanti
+- `tokio` da `features = ["full"]` alle 8 feature realmente usate; `package.json` rinominato da `tauri-app` a `heedm` + script `typecheck`
+- CLAUDE.md: mappa moduli riallineata (mancavano `permissions.rs`, `aec.rs`, `diarization.rs`, tutta la UI post-refactor), doc rule estesa a `permissions.rs`
+
+**Decisioni:**
+- **shadcn resta**, anche se `components/ui/button` non è importato da nessuno: è la base per i componenti futuri, non codice morto da rimuovere
+- **`start_local_server` interno invece che cancellato**: la logica di spawn serve, era solo esposta due volte come command
+- **`settings.local.json` resta fuori da git**: è per-macchina, i permessi condivisibili vivono in `settings.json`
+
+**Ceiling:** `cargo test` non linka su questo setup (solo-CLT, `__swift_FORCE_LOAD_$_swiftCompatibility56` via `apple_metal`). Preesistente, verificato con stash: la verifica reale resta `cargo check`.
+
+**Prossimi passi:** split di `commands.rs` (850 righe, 5 responsabilità), test sulle funzioni pure (`aec`, `diarization`, `mixer`, `groupSegments`), decisione su `system_audio/windows.rs` stub.
+
+---
+
 ## 2026-07-17 — Import file audio esterno da trascrivere
 
 **Obiettivo:** oltre a registrare, permettere di caricare un file audio già esistente (dal Finder) e trascriverlo con lo stesso flusso di una registrazione.
