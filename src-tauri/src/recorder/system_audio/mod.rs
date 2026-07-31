@@ -1,9 +1,7 @@
-#[cfg(target_os = "macos")]
-mod macos;
-#[cfg(target_os = "windows")]
-mod windows;
 #[cfg(target_os = "linux")]
 mod linux;
+#[cfg(target_os = "macos")]
+mod macos;
 
 use std::sync::{Arc, Mutex};
 
@@ -16,9 +14,6 @@ pub fn start(
 ) -> Result<Box<dyn SysAudioStop>, String> {
     #[cfg(target_os = "macos")]
     return macos::start(samples, sample_rate, channels);
-
-    #[cfg(target_os = "windows")]
-    return windows::start(samples, sample_rate, channels);
 
     #[cfg(target_os = "linux")]
     return linux::start(samples, sample_rate, channels);

@@ -17,20 +17,21 @@
 src-tauri/src/
   main.rs                        # entry point Rust (boilerplate Tauri)
   lib.rs                         # setup app, registra tutti i commands
-  commands.rs                    # Tauri commands esposti al frontend
+  commands/
+    mod.rs                       # settings, percorsi, permessi OS
+    stt.rs                       # download modello, ciclo di vita whisper-server, trascrizione
+    recording.rs                 # start/stop/status/list registrazione, import file
   permissions.rs                 # permessi OS (Screen Recording via CoreGraphics, pannelli System Settings)
   recorder/
     mod.rs                       # structs condivise (RecorderState, SysAudioStop)
+    audio.rs                     # primitive condivise: rms, to_mono, resample, mix, WAV
     mic.rs                       # cattura microfono via cpal
-    mixer.rs                     # mix mic + system audio
     aec.rs                       # echo cancellation: toglie il system audio rientrato nel mic
     diarization.rs               # timeline speaker (mic/sys/both) da energia dei due canali
-    writer.rs                    # scrittura WAV con hound
     system_audio/
       mod.rs                     # routing platform-specific
       macos.rs                   # SCStream (ScreenCaptureKit)
       linux.rs                   # PulseAudio/PipeWire monitor source
-      windows.rs                 # stub (non implementato)
 
 src/
   main.ts                        # entry point Svelte
@@ -99,8 +100,8 @@ Ogni volta che modifichi o aggiungi codice, aggiorna il doc corrispondente:
 |---|---|
 | `recorder/` (qualsiasi file) | `docs/backend/recorder.md` |
 | `permissions.rs` | `docs/backend/commands.md` |
-| `commands.rs` — sezione STT | `docs/backend/stt.md` |
-| `commands.rs` — sezione recording | `docs/backend/commands.md` |
+| `commands/stt.rs` | `docs/backend/stt.md` |
+| `commands/mod.rs`, `commands/recording.rs` | `docs/backend/commands.md` |
 | `src/` (Svelte) | `docs/frontend/ui.md` |
 | flusso dati o dipendenze | `docs/architecture.md` |
 | decisione non ovvia o cambio architettura | aggiungi entry in `DEVLOG.md` |

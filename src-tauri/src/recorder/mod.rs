@@ -1,9 +1,8 @@
 pub mod aec;
+pub mod audio;
 pub mod diarization;
 pub mod mic;
-pub mod mixer;
 pub mod system_audio;
-pub mod writer;
 
 use std::sync::{Arc, Mutex};
 
@@ -38,7 +37,7 @@ impl RecorderInner {
             sys_samples: Arc::new(Mutex::new(Vec::new())),
             mic_stream: None,
             sys_capture: None,
-            sample_rate: 16_000,
+            sample_rate: audio::TARGET_SAMPLE_RATE,
             mic_native_rate: 48_000,
             channels: 2,
         }

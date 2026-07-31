@@ -23,9 +23,9 @@ Stato interno della registrazione. Tenuto sotto `tokio::sync::Mutex`.
 | `sys_samples` | `Arc<Mutex<Vec<f32>>>` | Buffer campioni audio sistema |
 | `mic_stream` | `Option<cpal::Stream>` | Stream cpal attivo |
 | `sys_capture` | `Option<Box<dyn SysAudioStop>>` | Handle cattura sistema |
-| `sample_rate` | `u32` | Rate di **output** della registrazione — fisso, = `TARGET_SAMPLE_RATE` (16000, lo stesso richiesto da whisper). Usato da mixer/diarizzazione/writer |
+| `sample_rate` | `u32` | Rate di **output** della registrazione — fisso, = `TARGET_SAMPLE_RATE` (16000, lo stesso richiesto da whisper). Usato da `audio::mix`, diarizzazione e `audio::write_wav` |
 | `mic_native_rate` | `u32` | Rate **nativo** del device microfono al momento della cattura (cpal, dinamico, dipende dall'hardware). Serve solo per ricampionare il buffer mic verso `sample_rate` a fine registrazione |
-| `channels` | `u16` | Canali del microfono (default 2) |
+| `channels` | `u16` | Canali **del microfono** così come li espone cpal (default 2). Serve solo a `audio::to_mono` in `stop_recording`: il WAV prodotto è sempre mono |
 
 ### `RecorderState`
 Wrapper Tauri-managed: `pub struct RecorderState(pub tokio::sync::Mutex<RecorderInner>)`.
@@ -48,7 +48,14 @@ Il `Stream` va tenuto vivo in `RecorderInner::mic_stream` — dropparlo ferma la
 
 ---
 
-## Mixer (`mixer.rs`)
+## Primitive audio (`audio.rs`)
+
+Modulo condiviso da recorder, AEC, diarizzazione e comandi. Raccoglie `TARGET_SAMPLE_RATE`, `rms`, `to_mono`, `resample_linear`, `mix`, `write_wav` ed `encode_wav`: `rms` era duplicata fra `aec.rs` e `diarization.rs`, la conversione `f32 -> i16` fra `writer.rs` e `prepare_for_whisper`, il downmix a mono fra `import_audio_file` e `prepare_for_whisper`.
+
+### `to_mono(samples: Vec<f32>, channels: u16) -> Vec<f32>`
+Downmix di un buffer interleaved. Prende ownership per restituire il buffer intatto quando e' gia' mono. Va sempre chiamato **prima** di `resample_linear`: su buffer interleaved l'interpolazione lineare mescolerebbe campioni di canali diversi.
+
+### `mix(mic: &[f32], sys: &[f32]) -> Vec<f32>`
 
 ### `mix(mic: &[f32], sys: &[f32]) -> Vec<f32>`
 Somma i due buffer sample-by-sample fino al più lungo (il più corto viene
@@ -56,7 +63,8 @@ considerato silenzio/zero-padded oltre la propria lunghezza).
 Clamp a `[-1.0, 1.0]` per prevenire clipping.
 
 Richiede che `mic`/`sys` siano già allo **stesso rate** (`sample_rate`,
-`TARGET_SAMPLE_RATE`): `stop_recording` (`commands.rs`) ricampiona il buffer mic
+`TARGET_SAMPLE_RATE`): `stop_recording` (`commands/recording.rs`) porta il buffer mic
+a mono e lo ricampiona
 dal suo rate nativo (`mic_native_rate`) a `sample_rate` con `resample_linear`
 (interpolazione lineare pura-Rust, stessa logica condivisa con
 `prepare_for_whisper`, vedi [`docs/backend/stt.md`](stt.md)) **prima** di
@@ -83,8 +91,8 @@ contenere più persone (es. una chiamata multi-partecipante lato sistema viene
 etichettata come un unico "sistema").
 
 ### Sidecar `recording.diarization.json`
-`stop_recording` (in `commands.rs`) chiama `estimate_timeline` sui buffer grezzi
-**prima** di passarli a `mixer::mix` — una volta fusi in un'unica traccia mono
+`stop_recording` (in `commands/recording.rs`) chiama `estimate_timeline` sui buffer grezzi
+**prima** di passarli a `audio::mix` — una volta fusi in un'unica traccia mono
 l'informazione "chi" è persa — e scrive il risultato come JSON nella cartella
 della registrazione come `recording.diarization.json` (stessa cartella di `recording.wav`).
 
@@ -112,7 +120,7 @@ Records/
 
 ### `cancel_echo(mic: &[f32], sys: &[f32], sample_rate: u32) -> Vec<f32>`
 
-Rimuove l'echo acustico di `sys` dal segnale `mic` (i.e. la porzione di audio di sistema captata dalle casse e ripresa dal microfono). Applicato in `stop_recording` (`commands.rs`) dopo il resample del mic, prima di `estimate_timeline` e `mix`.
+Rimuove l'echo acustico di `sys` dal segnale `mic` (i.e. la porzione di audio di sistema captata dalle casse e ripresa dal microfono). Applicato in `stop_recording` (`commands/recording.rs`) dopo il resample del mic, prima di `estimate_timeline` e `mix`.
 
 **Algoritmo offline in 3 step:**
 
@@ -128,11 +136,12 @@ Rimuove l'echo acustico di `sys` dal segnale `mic` (i.e. la porzione di audio di
 
 ---
 
-## Writer (`writer.rs`)
-
 ### `write_wav(samples: &[f32], path: &Path, sample_rate: u32, channels: u16) -> Result<(), String>`
 Scrive un file WAV in formato `Int16 PCM` usando `hound::WavWriter` (converte ogni sample `f32` con clamp `[-1.0, 1.0]` poi scala per `i16::MAX`).
 Spec WAV output: `{ bits_per_sample: 16, sample_format: Int, channels, sample_rate }`.
+
+### `encode_wav(samples: &[f32], sample_rate: u32, channels: u16) -> Result<Vec<u8>, String>`
+Stessa scrittura, ma su un buffer in memoria invece che su file.
 
 ---
 
@@ -152,5 +161,4 @@ Richiede permesso `NSScreenCaptureUsageDescription` (in `Info.plist`).
 - Cerca device con nome contenente "monitor" tra gli input devices
 - Supporta F32 e I16 (stessa normalizzazione di mic.rs)
 
-### Windows (`system_audio/windows.rs`)
-Stub — ritorna `Err("Windows system audio capture not yet implemented")`.
+Windows non è supportato: lo stub è stato rimosso, `system_audio::start` ritorna un errore esplicito su piattaforme diverse da macOS e Linux.

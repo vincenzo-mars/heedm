@@ -1,0 +1,357 @@
+//! Cattura microfono + audio di sistema, import di file esterni e listing.
+
+use std::path::{Path, PathBuf};
+
+use serde::{Deserialize, Serialize};
+use tauri::{AppHandle, State};
+use tauri_plugin_dialog::DialogExt;
+
+use super::stt::TranscriptResult;
+use super::{get_stt_settings, recordings_dir};
+use crate::recorder::audio::{self, TARGET_SAMPLE_RATE};
+use crate::recorder::{aec, diarization, mic, system_audio, RecorderState};
+
+const AUDIO_EXTENSIONS: &[&str] = &["wav", "mp3", "m4a", "mp4", "flac", "ogg", "aac"];
+
+/// Crea la cartella `<recordings_dir>/<timestamp>` per una nuova entry e
+/// ritorna il path del WAV da scriverci. Condivisa da `stop_recording` e
+/// `import_audio_file`, che devono produrre entry indistinguibili.
+async fn new_recording_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let settings = get_stt_settings(app.clone()).await;
+    let dir = recordings_dir(app, &settings);
+    let timestamp = chrono::Local::now().format("%Y-%m-%d %H.%M.%S").to_string();
+    let folder = dir.join(&timestamp);
+    tokio::fs::create_dir_all(&folder)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(folder.join("recording.wav"))
+}
+
+// ── Import ─────────────────────────────────────────────────────────────────────
+
+/// Decodifica un file audio arbitrario (wav/mp3/m4a/mp4/flac/ogg) in campioni f32
+/// interleaved via symphonia (Rust puro, niente ffmpeg — coerente con il resample
+/// puro-Rust già usato qui). Ritorna (samples, channels, sample_rate).
+fn decode_audio(path: &Path) -> Result<(Vec<f32>, u16, u32), String> {
+    use symphonia::core::audio::SampleBuffer;
+    use symphonia::core::codecs::DecoderOptions;
+    use symphonia::core::errors::Error as SymphoniaError;
+    use symphonia::core::formats::FormatOptions;
+    use symphonia::core::io::MediaSourceStream;
+    use symphonia::core::meta::MetadataOptions;
+    use symphonia::core::probe::Hint;
+
+    let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    let mss = MediaSourceStream::new(Box::new(file), Default::default());
+
+    let mut hint = Hint::new();
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        hint.with_extension(ext);
+    }
+
+    let probed = symphonia::default::get_probe()
+        .format(
+            &hint,
+            mss,
+            &FormatOptions::default(),
+            &MetadataOptions::default(),
+        )
+        .map_err(|e| format!("Formato audio non riconosciuto: {e}"))?;
+    let mut format = probed.format;
+
+    let track = format
+        .default_track()
+        .ok_or("Nessuna traccia audio nel file")?;
+    let track_id = track.id;
+    let sample_rate = track
+        .codec_params
+        .sample_rate
+        .ok_or("Sample rate mancante nel file audio")?;
+    let channels = track.codec_params.channels.map(|c| c.count()).unwrap_or(1) as u16;
+
+    let mut decoder = symphonia::default::get_codecs()
+        .make(&track.codec_params, &DecoderOptions::default())
+        .map_err(|e| e.to_string())?;
+
+    let mut samples: Vec<f32> = Vec::new();
+    loop {
+        let packet = match format.next_packet() {
+            Ok(p) => p,
+            // Fine stream: symphonia segnala EOF come IoError(UnexpectedEof).
+            Err(SymphoniaError::IoError(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+                break
+            }
+            Err(e) => return Err(e.to_string()),
+        };
+        if packet.track_id() != track_id {
+            continue;
+        }
+        match decoder.decode(&packet) {
+            Ok(decoded) => {
+                let spec = *decoded.spec();
+                let mut buf = SampleBuffer::<f32>::new(decoded.capacity() as u64, spec);
+                buf.copy_interleaved_ref(decoded);
+                samples.extend_from_slice(buf.samples());
+            }
+            // Un pacchetto corrotto non deve abortire l'intero file.
+            Err(SymphoniaError::DecodeError(_)) => continue,
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+
+    if samples.is_empty() {
+        return Err("Il file audio non contiene campioni decodificabili".to_string());
+    }
+
+    Ok((samples, channels, sample_rate))
+}
+
+/// Importa un file audio esterno: apre il picker, decodifica, e lo salva come
+/// `recording.wav` (mono 16kHz 16-bit) in una nuova cartella — identico a ciò che
+/// produce `stop_recording`, così l'entry segue lo stesso flusso (Records +
+/// `transcribe_recording`). Ritorna il path del WAV, oppure `None` se annullato.
+#[tauri::command]
+pub async fn import_audio_file(app: AppHandle) -> Result<Option<String>, String> {
+    let picker_app = app.clone();
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        picker_app
+            .dialog()
+            .file()
+            .add_filter("Audio", AUDIO_EXTENSIONS)
+            .blocking_pick_file()
+            .and_then(|fp| fp.into_path().ok())
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let Some(src) = picked else {
+        return Ok(None);
+    };
+
+    let (samples, channels, sample_rate) = {
+        let src = src.clone();
+        tokio::task::spawn_blocking(move || decode_audio(&src))
+            .await
+            .map_err(|e| e.to_string())??
+    };
+
+    let mono = audio::to_mono(samples, channels);
+    let mono16k = audio::resample_linear(&mono, sample_rate, TARGET_SAMPLE_RATE);
+
+    let path = new_recording_path(&app).await?;
+    audio::write_wav(&mono16k, &path, TARGET_SAMPLE_RATE, 1)?;
+
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+// ── Registrazione ─────────────────────────────────────────────────────────────
+
+#[derive(Serialize)]
+pub struct RecordingStatus {
+    pub is_recording: bool,
+    pub duration_ms: u64,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct RecordingEntry {
+    pub folder_path: String,
+    pub name: String,
+    pub transcript: Option<TranscriptResult>,
+}
+
+#[tauri::command]
+pub async fn start_recording(state: State<'_, RecorderState>) -> Result<(), String> {
+    let mut inner = state.0.lock().await;
+    if inner.is_recording {
+        return Err("Already recording".to_string());
+    }
+
+    let mic_buf = inner.mic_samples.clone();
+    let sys_buf = inner.sys_samples.clone();
+
+    mic_buf.lock().unwrap().clear();
+    sys_buf.lock().unwrap().clear();
+
+    let mic_info = mic::start_mic_capture(mic_buf)?;
+    // SCStream (macOS) converte nativamente al rate richiesto — catturare l'audio
+    // di sistema già a TARGET_SAMPLE_RATE evita di doverlo ricampionare a valle.
+    let sys_capture = match system_audio::start(sys_buf, TARGET_SAMPLE_RATE, mic_info.channels) {
+        Ok(capture) => Some(capture),
+        Err(e) => {
+            eprintln!("Cattura audio di sistema non disponibile: {e}");
+            None
+        }
+    };
+
+    inner.sample_rate = TARGET_SAMPLE_RATE;
+    inner.mic_native_rate = mic_info.sample_rate;
+    inner.channels = mic_info.channels;
+    inner.mic_stream = Some(mic_info.stream);
+    inner.sys_capture = sys_capture;
+    inner.is_recording = true;
+    inner.start_time = Some(std::time::Instant::now());
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn stop_recording(
+    state: State<'_, RecorderState>,
+    app: AppHandle,
+) -> Result<String, String> {
+    let (mixed, sample_rate, timeline) = {
+        let mut inner = state.0.lock().await;
+        if !inner.is_recording {
+            return Err("Not recording".to_string());
+        }
+
+        inner.mic_stream = None;
+        let had_sys_audio = inner.sys_capture.is_some();
+        if let Some(mut sys) = inner.sys_capture.take() {
+            sys.stop()?;
+        }
+        inner.is_recording = false;
+        inner.start_time = None;
+
+        let mic_raw = std::mem::take(&mut *inner.mic_samples.lock().unwrap());
+        let sys = std::mem::take(&mut *inner.sys_samples.lock().unwrap());
+        let sr = inner.sample_rate;
+        let ch = inner.channels;
+
+        // Il mic cattura al rate nativo del device (cpal non lo forza) e con il
+        // numero di canali del device: portarlo a mono prima del resample è
+        // obbligatorio, perché l'interpolazione lineare su buffer interleaved
+        // mescolerebbe campioni di canali diversi.
+        let mic = audio::to_mono(mic_raw, ch);
+        let mic = audio::resample_linear(&mic, inner.mic_native_rate, sr);
+
+        // AEC: rimuove l'echo acustico di sys dal mic prima di diarizzazione e mix.
+        // Solo quando sys è attivo — senza audio di sistema non c'è echo da cancellare.
+        let mic = if had_sys_audio && !sys.is_empty() {
+            aec::cancel_echo(&mic, &sys, sr)
+        } else {
+            mic
+        };
+
+        // Solo se è stato catturato anche audio di sistema ha senso stimare un
+        // timeline mic-vs-sistema: senza una seconda sorgente sarebbe sempre "mic".
+        let timeline = had_sys_audio.then(|| diarization::estimate_timeline(&mic, &sys, sr));
+
+        (audio::mix(&mic, &sys), sr, timeline)
+    };
+
+    let path = new_recording_path(&app).await?;
+    audio::write_wav(&mixed, &path, sample_rate, 1)?;
+
+    // Sidecar best-effort: la diarizzazione è un arricchimento, non deve mai far
+    // fallire la registrazione (il file WAV è già scritto a questo punto).
+    if let Some(timeline) = timeline {
+        let sidecar_path = path.with_extension("diarization.json");
+        match serde_json::to_vec(&timeline) {
+            Ok(json) => {
+                if let Err(e) = tokio::fs::write(&sidecar_path, json).await {
+                    eprintln!("Impossibile scrivere sidecar diarizzazione: {e}");
+                }
+            }
+            Err(e) => eprintln!("Impossibile serializzare timeline diarizzazione: {e}"),
+        }
+    }
+
+    Ok(path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub async fn get_recording_status(
+    state: State<'_, RecorderState>,
+) -> Result<RecordingStatus, String> {
+    let inner = state.0.lock().await;
+    Ok(RecordingStatus {
+        is_recording: inner.is_recording,
+        duration_ms: inner
+            .start_time
+            .map(|t| t.elapsed().as_millis() as u64)
+            .unwrap_or(0),
+    })
+}
+
+#[tauri::command]
+pub async fn list_recordings(app: AppHandle) -> Result<Vec<RecordingEntry>, String> {
+    let settings = get_stt_settings(app.clone()).await;
+    let dir = recordings_dir(&app, &settings);
+
+    if !dir.exists() {
+        return Ok(vec![]);
+    }
+
+    let mut read_dir = tokio::fs::read_dir(&dir).await.map_err(|e| e.to_string())?;
+    let mut result = Vec::new();
+
+    while let Some(entry) = read_dir.next_entry().await.map_err(|e| e.to_string())? {
+        let folder = entry.path();
+        if !folder.is_dir() || !folder.join("recording.wav").exists() {
+            continue;
+        }
+        let name = folder
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_string();
+        let transcript = tokio::fs::read(folder.join("transcript.json"))
+            .await
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok());
+        result.push(RecordingEntry {
+            folder_path: folder.to_string_lossy().into_owned(),
+            name,
+            transcript,
+        });
+    }
+
+    result.sort_by(|a, b| b.name.cmp(&a.name));
+    Ok(result)
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::*;
+    use std::process::Command;
+
+    /// Genera una fixture audio compressa con gli strumenti nativi macOS (come lo
+    /// smoke test STT del progetto), poi verifica che `decode_audio` la porti a
+    /// campioni f32 — copre il ramo rischioso nuovo (symphonia mp4/m4a/AAC), non
+    /// il WAV che hound già gestiva.
+    fn decode_fixture(afconvert_fmt: &str, ext: &str) -> (Vec<f32>, u16, u32) {
+        // Path unici per formato: i test girano in parallelo e condividere la
+        // fixture aiff causava collisioni di scrittura (afconvert errore -54).
+        let dir = std::env::temp_dir();
+        let aiff = dir.join(format!("heedm_decode_fix_{ext}.aiff"));
+        let out = dir.join(format!("heedm_decode_fix.{ext}"));
+        Command::new("say")
+            .args(["-v", "Alice", "-o"])
+            .arg(&aiff)
+            .arg("prova di decodifica audio")
+            .status()
+            .expect("say non disponibile");
+        Command::new("afconvert")
+            .args(["-f", afconvert_fmt, "-d", "aac"])
+            .arg(&aiff)
+            .arg(&out)
+            .status()
+            .expect("afconvert non disponibile");
+        decode_audio(&out).expect("decode_audio ha fallito")
+    }
+
+    #[test]
+    fn decodes_m4a_to_samples() {
+        let (samples, channels, rate) = decode_fixture("m4af", "m4a");
+        assert!(!samples.is_empty(), "nessun campione decodificato da m4a");
+        assert!(channels >= 1);
+        assert!(rate > 0);
+    }
+
+    #[test]
+    fn decodes_mp4_to_samples() {
+        let (samples, _, _) = decode_fixture("mp4f", "mp4");
+        assert!(!samples.is_empty(), "nessun campione decodificato da mp4");
+    }
+}

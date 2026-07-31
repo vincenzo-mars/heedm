@@ -2,6 +2,7 @@ mod commands;
 mod permissions;
 mod recorder;
 
+use commands::stt::WhisperServerState;
 use recorder::RecorderState;
 use tauri::Manager;
 
@@ -11,36 +12,36 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(RecorderState::new())
-        .manage(commands::WhisperServerState::new())
+        .manage(WhisperServerState::new())
         .invoke_handler(tauri::generate_handler![
-            commands::start_recording,
-            commands::stop_recording,
-            commands::get_recording_status,
-            commands::transcribe_recording,
-            commands::check_stt_server,
-            commands::start_stt_server,
+            commands::recording::start_recording,
+            commands::recording::stop_recording,
+            commands::recording::get_recording_status,
+            commands::recording::import_audio_file,
+            commands::recording::list_recordings,
+            commands::stt::transcribe_recording,
+            commands::stt::check_stt_server,
+            commands::stt::start_stt_server,
+            commands::stt::download_local_model,
             commands::get_stt_settings,
             commands::save_stt_settings,
             commands::get_local_model_path,
             commands::get_recordings_dir,
-            commands::import_audio_file,
-            commands::download_local_model,
             commands::check_screen_recording_permission,
             commands::open_permission_settings,
-            commands::list_recordings,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
 
     app.run(|app_handle, event| {
         if let tauri::RunEvent::ExitRequested { .. } = event {
-            if let Some(mut child) = app_handle
-                .state::<commands::WhisperServerState>()
+            let child = app_handle
+                .state::<WhisperServerState>()
                 .0
                 .lock()
-                .unwrap()
-                .take()
-            {
+                .ok()
+                .and_then(|mut guard| guard.take());
+            if let Some(mut child) = child {
                 let _ = child.start_kill();
             }
         }

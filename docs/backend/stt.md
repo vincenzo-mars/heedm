@@ -1,6 +1,6 @@
 # STT — integrazione Whisper locale
 
-File: `src-tauri/src/commands.rs` (sezione STT)
+File: `src-tauri/src/commands/stt.rs`
 
 ## Architettura
 
@@ -34,7 +34,7 @@ Default quando l'utente non ha scelto un percorso (`model_dir`/`recordings_dir` 
 
 Nome file generato con timestamp leggibile locale (`chrono::Local::now()`, formato `%Y-%m-%d %H.%M.%S`), es. `Registrazione 2026-06-07 15.30.12.wav`.
 
-Funzioni helper in `commands.rs`: `model_dir`, `bundled_bin_path`, `local_model_path`, `default_recordings_dir`, `recordings_dir` — tutte (tranne `bundled_bin_path`, che non dipende dalle settings) prendono `&SttSettings` già caricato per evitare letture multiple di `settings.json`.
+Funzioni helper in `commands/stt.rs`: `model_dir`, `bundled_bin_path`, `local_model_path`, `default_recordings_dir`, `recordings_dir` — tutte (tranne `bundled_bin_path`, che non dipende dalle settings) prendono `&SttSettings` già caricato per evitare letture multiple di `settings.json`.
 
 **Nota cambio `model_dir`:** non c'è migrazione automatica del modello (~1.5GB). Cambiando cartella, l'app non lo trova più nel nuovo percorso e richiede un nuovo download lì. Il pannello impostazioni avvisa l'utente prima del cambio. Il binario non è interessato — è bundled con l'app, non dipende da `model_dir`.
 
@@ -44,7 +44,7 @@ whisper.cpp **non distribuisce** un binario `server` precompilato per macOS via 
 
 Meccanismo (Tauri v2 `bundle.resources`):
 - `tauri.conf.json` → `bundle.resources: { "binaries/whisper-server": "whisper-server" }` — il file in `src-tauri/binaries/whisper-server` viene copiato come risorsa dell'app (sia in dev che nel bundle finale, via `tauri_build::build()` chiamato da `build.rs`)
-- A runtime, `bundled_bin_path` (`commands.rs`) risolve il percorso con `app.path().resolve("whisper-server", BaseDirectory::Resource)`
+- A runtime, `bundled_bin_path` (`commands/stt.rs`) risolve il percorso con `app.path().resolve("whisper-server", BaseDirectory::Resource)`
 
 Build del binario — script `scripts/build-whisper-server.sh`:
 - Compila whisper.cpp (`examples/server`, target cmake `whisper-server`) con `BUILD_SHARED_LIBS=OFF` (binario statico, zero dylib esterne da bundlare — verificato via `otool -L`) e `GGML_METAL=ON` (accelerazione GPU su Apple Silicon e Intel)
@@ -122,7 +122,7 @@ Gli eventi sono `"download-progress"` con payload `{ step: "model"|"done", pct: 
 
 ### Terminazione alla chiusura dell'app
 
-`WhisperServerState` (`commands.rs`) tiene l'unico handle al processo `whisper-server`. In `lib.rs`, l'app viene costruita con `.build()` invece di `.run()` diretto, e il loop eventi gestisce `RunEvent::ExitRequested`: estrae il `Child` dallo state e chiama `start_kill()`, così il processo non resta orfano in background dopo il quit.
+`WhisperServerState` (`commands/stt.rs`) tiene l'unico handle al processo `whisper-server`. In `lib.rs`, l'app viene costruita con `.build()` invece di `.run()` diretto, e il loop eventi gestisce `RunEvent::ExitRequested`: estrae il `Child` dallo state e chiama `start_kill()`, così il processo non resta orfano in background dopo il quit.
 
 ## Trascrizione (`transcribe_recording`)
 
@@ -157,11 +157,11 @@ Dopo aver ricevuto `TranscriptResult`, `transcribe_recording`:
 
 ### Conversione audio in memoria (`prepare_for_whisper`)
 
-`whisper.cpp`'s `read_wav` (`common.cpp`) accetta **solo** WAV mono, 16kHz, 16-bit PCM — qualsiasi altro formato → `{"error":"failed to read WAV file"}`. Dalla registrazione a `TARGET_SAMPLE_RATE` (vedi `recorder.md` — `stop_recording` ricampiona il mic e scrive a 16kHz fisso, `recorder/writer.rs`), le **nuove** registrazioni sono già in questo identico formato: `prepare_for_whisper` diventa per loro un passthrough quasi a costo zero. Resta necessaria per:
+`whisper.cpp`'s `read_wav` (`common.cpp`) accetta **solo** WAV mono, 16kHz, 16-bit PCM — qualsiasi altro formato → `{"error":"failed to read WAV file"}`. Dalla registrazione a `TARGET_SAMPLE_RATE` (vedi `recorder.md` — `stop_recording` ricampiona il mic e scrive a 16kHz fisso, `recorder/audio.rs`), le **nuove** registrazioni sono già in questo identico formato: `prepare_for_whisper` diventa per loro un passthrough quasi a costo zero. Resta necessaria per:
 - registrazioni **legacy** (pre-cambio sample-rate), salvate al rate nativo del microfono via cpal (dinamico, es. 44100/48000 Hz)
 - buffer stereo/multi-canale (downmix a mono)
 
-`prepare_for_whisper` (`commands.rs`) converte **solo in memoria**, al momento dell'invio, senza toccare il file salvato:
+`prepare_for_whisper` (`commands/stt.rs`) converte **solo in memoria**, al momento dell'invio, senza toccare il file salvato:
 1. Legge il WAV con `hound::WavReader`, normalizza i sample a `f32` (gestisce sia `Float` che `Int`)
 2. Downmix a mono (media dei canali, se stereo)
 3. Resample al rate target (`TARGET_SAMPLE_RATE` = 16kHz) via `resample_linear` — interpolazione lineare condivisa con `stop_recording` (early-return passthrough se il rate è già quello giusto), gestisce rate arbitrario in ingresso, non un rapporto fisso (44100→16000 non è un intero)

@@ -13,6 +13,29 @@ Formato:
 
 ---
 
+## 2026-07-31 — Split di commands.rs e primitive audio condivise
+
+**Obiettivo:** secondo lotto della riduzione. Sciogliere il monolite `commands.rs` (824 righe, un terzo del codice) e togliere le duplicazioni nel Rust.
+
+**Fatto:**
+- `commands.rs` → `commands/mod.rs` (settings, percorsi, permessi), `commands/stt.rs` (modello, server, trascrizione), `commands/recording.rs` (cattura, import, listing). Nessun file sopra le ~300 righe
+- Nuovo `recorder/audio.rs`: `TARGET_SAMPLE_RATE`, `rms`, `to_mono`, `resample_linear`, `mix`, `write_wav`, `encode_wav`. Assorbe `mixer.rs` e `writer.rs`, che spariscono
+- Deduplicate tre copie: `rms` era in `aec.rs` e `diarization.rs`, la conversione `f32 -> i16` in `writer.rs` e `prepare_for_whisper`, il downmix a mono in `import_audio_file` e `prepare_for_whisper`
+- Nuovo helper `new_recording_path`: il blocco "timestamp → crea cartella → path del WAV" era copiato in `stop_recording` e `import_audio_file`
+- `SttSettings` usa `#[derive(Default)]` al posto dell'`impl Default` scritto a mano
+- Rimosso `system_audio/windows.rs` (stub che ritornava solo `Err`); `lib.rs` registra i comandi con il percorso completo del modulo
+- Tolti tre `unwrap()` dal path principale: `model_path.parent()`, `model.to_str()` e il lock di `WhisperServerState`
+
+**Decisioni:**
+- **`stop_recording` scrive sempre mono.** Prima passava a `write_wav` il numero di canali del microfono, ma applicava `resample_linear` al buffer **interleaved**: con un mic a 2 canali l'interpolazione lineare avrebbe mescolato campioni sinistri con destri, corrompendo l'audio. Non si vedeva perché il mic in uso è mono. Ora il downmix a mono è esplicito e precede il resample
+- **Percorsi completi in `generate_handler!`** invece di `pub use` nel `mod.rs`: la macro di Tauri genera anche `__cmd__<nome>` e non segue i re-export
+
+**Verificato:** `cargo check` verde. Non verificato: registrazione reale e smoke test STT, che richiedono la GUI.
+
+**Prossimi passi:** delega della diarizzazione a whisper (WAV stereo + `diarize=true`), fix orfani whisper-server, flag v1.9.1.
+
+---
+
 ## 2026-07-31 — Rimozione di shadcn-svelte
 
 **Obiettivo:** primo lotto del lavoro di riduzione della repo. Togliere lo stack shadcn-svelte, mai entrato in uso.

@@ -1,6 +1,6 @@
 # Tauri Commands — reference
 
-File: `src-tauri/src/commands.rs`
+File: `src-tauri/src/commands/mod.rs` (settings, percorsi, permessi) e `src-tauri/src/commands/recording.rs` (registrazione, import, listing)
 Registrati in: `src-tauri/src/lib.rs`
 
 ## Recording

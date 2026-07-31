@@ -24,12 +24,12 @@
                 ├──────────────┬───────────────┤   (buffer ora allo stesso rate —
                 │              │               │    usati due volte prima di essere fusi)
                 ▼              │               ▼
-       [mixer::mix()]         │      [diarization::estimate_timeline()]
+       [audio::mix()]         │      [diarization::estimate_timeline()]
        somma sample-by-sample │      energia RMS mic vs sistema a finestre
        clamp ±1.0             │      → intervalli {start, end, label}
                 │             │               │
                 ▼             │               ▼
-       [writer::write_wav()] │      [<nome>.diarization.json]
+       [audio::write_wav()] │      [<nome>.diarization.json]
        WAV Int16 PCM         │      sidecar accanto al WAV
        16kHz fisso/channels  │      (solo se audio sistema attivo,
                 │            │       best-effort — non blocca la REC)

@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use super::audio::rms;
+
 const WINDOW_SECS: f64 = 0.2;
 const DOMINANCE_RATIO: f32 = 1.5;
 
@@ -39,14 +41,6 @@ pub struct SpeakerInterval {
     pub start: f64,
     pub end: f64,
     pub label: SpeakerLabel,
-}
-
-fn rms(samples: &[f32]) -> f32 {
-    if samples.is_empty() {
-        return 0.0;
-    }
-    let sum_sq: f32 = samples.iter().map(|s| s * s).sum();
-    (sum_sq / samples.len() as f32).sqrt()
 }
 
 /// Stima un timeline di attività mic-vs-sistema confrontando l'energia RMS dei due

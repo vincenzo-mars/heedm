@@ -1,6 +1,8 @@
 // ponytail: simplified offline AEC — delay estimation via cross-correlation + least-squares subtraction.
 // Covers the dominant echo path (direct acoustic). For multi-path reverb, use webrtc-audio-processing.
 
+use super::audio::rms;
+
 const MAX_DELAY_MS: usize = 200;
 const CORR_WINDOW: usize = 32_000; // 2s at 16kHz — enough to find delay without scanning full buffer
 const MIN_CORR: f32 = 0.10; // skip AEC if echo is negligible
@@ -63,11 +65,4 @@ fn subtract(mic: &[f32], sys: &[f32], delay: usize, alpha: f32) -> Vec<f32> {
         }
     }
     out
-}
-
-fn rms(s: &[f32]) -> f32 {
-    if s.is_empty() {
-        return 0.0;
-    }
-    (s.iter().map(|x| x * x).sum::<f32>() / s.len() as f32).sqrt()
 }
