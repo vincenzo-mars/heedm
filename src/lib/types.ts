@@ -38,9 +38,15 @@ export interface RecordingEntry {
   folder_path: string;
   name: string;
   transcript: TranscriptResult | null;
+  error: string | null;
 }
 
-export type SttStatus = "checking" | "starting" | "running" | "error";
+export type SttStatus =
+  | "checking"
+  | "starting"
+  | "running"
+  | "error"
+  | "stopped";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -56,6 +62,44 @@ const UNKNOWN_SPEAKER = { label: "Sconosciuto", color: "#6b7280" };
 
 export function speakerInfo(speaker: string): { label: string; color: string } {
   return SPEAKER_INFO[speaker] ?? UNKNOWN_SPEAKER;
+}
+
+// Stato derivato di una entry, non persistito come tale: il backend scrive solo
+// `transcript`/`error` su disco (vedi `transcribe_recording`), qui si ricava la
+// terza etichetta per il badge. Da non confondere con `RecordingStatus` sopra,
+// che è lo stato della registrazione in corso (`get_recording_status`).
+export type TranscriptStatus = "transcribed" | "pending" | "failed";
+
+export function transcriptStatus(entry: RecordingEntry): TranscriptStatus {
+  if (entry.transcript) return "transcribed";
+  if (entry.error) return "failed";
+  return "pending";
+}
+
+const TRANSCRIPT_STATUS_INFO: Record<
+  TranscriptStatus,
+  { label: string; className: string }
+> = {
+  transcribed: {
+    label: "trascritto",
+    className: "border border-green-800/60 bg-green-950/40 text-green-400",
+  },
+  pending: {
+    label: "in attesa",
+    className:
+      "border border-brand-cream/20 bg-transparent text-brand-cream/40",
+  },
+  failed: {
+    label: "fallito",
+    className: "border border-red-800/60 bg-red-950/40 text-red-400",
+  },
+};
+
+export function transcriptStatusInfo(entry: RecordingEntry): {
+  label: string;
+  className: string;
+} {
+  return TRANSCRIPT_STATUS_INFO[transcriptStatus(entry)];
 }
 
 export function formatDuration(ms: number): string {

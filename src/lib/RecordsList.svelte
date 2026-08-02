@@ -1,18 +1,33 @@
 <script lang="ts">
 import { invoke } from "@tauri-apps/api/core";
 import Button from "./Button.svelte";
-import { formatElapsed, type RecordingEntry } from "./types";
+import {
+  formatElapsed,
+  type RecordingEntry,
+  transcriptStatusInfo,
+} from "./types";
 
 let {
   onSelect,
   onBack,
+  isRecording,
+  isTranscribing,
+  onRetry,
 }: {
   onSelect: (entry: RecordingEntry) => void;
   onBack: () => void;
+  isRecording: boolean;
+  isTranscribing: boolean;
+  onRetry: (folderPath: string) => Promise<RecordingEntry[]>;
 } = $props();
 
 let entries = $state<RecordingEntry[]>([]);
 let loading = $state(true);
+
+// Lock globale (REC o una trascrizione, incluso un rilancio, già in corso):
+// blocca sia la selezione sia il rilancio su OGNI riga, non solo su quella
+// interessata (vedi App.svelte, `isTranscribing`).
+let locked = $derived(isRecording || isTranscribing);
 
 $effect(() => {
   invoke<RecordingEntry[]>("list_recordings")
@@ -23,6 +38,11 @@ $effect(() => {
       loading = false;
     });
 });
+
+async function handleRetry(entry: RecordingEntry) {
+  if (locked) return;
+  entries = await onRetry(entry.folder_path);
+}
 </script>
 
 <div class="flex w-full max-w-170 flex-col gap-4">
@@ -41,28 +61,37 @@ $effect(() => {
     <p class="text-sm text-brand-cream/50">Nessuna registrazione trovata.</p>
   {:else}
     {#each entries as entry (entry.folder_path)}
-      <button
-        class="flex cursor-pointer items-center justify-between rounded-xl border border-brand-cream/10 bg-brand-darker px-5 py-4 text-left transition-colors hover:border-brand-cream/20"
-        onclick={() => onSelect(entry)}
+      {@const status = transcriptStatusInfo(entry)}
+      <div
+        class="flex items-center justify-between gap-3 rounded-xl border border-brand-cream/10 bg-brand-darker px-5 py-4 transition-colors hover:border-brand-cream/20"
       >
-        <span class="text-sm font-semibold text-brand-cream">{entry.name}</span>
-        <span class="flex items-center gap-2">
-          {#if entry.transcript?.transcription_ms != null}
-            <span class="whitespace-nowrap font-mono text-[0.7rem] text-brand-cream/40">
-              {formatElapsed(entry.transcript.transcription_ms)}
+        <button
+          class="flex flex-1 cursor-pointer items-center justify-between gap-3 border-none bg-transparent p-0 text-left disabled:cursor-default"
+          onclick={() => onSelect(entry)}
+          disabled={locked}
+        >
+          <span class="text-sm font-semibold text-brand-cream">{entry.name}</span>
+          <span class="flex items-center gap-2">
+            {#if entry.transcript?.transcription_ms != null}
+              <span class="whitespace-nowrap font-mono text-[0.7rem] text-brand-cream/40">
+                {formatElapsed(entry.transcript.transcription_ms)}
+              </span>
+            {/if}
+            <span
+              class={`whitespace-nowrap rounded-full px-2 py-0.5 text-[0.7rem] font-semibold ${status.className}`}
+            >
+              {status.label}
             </span>
-          {/if}
-          <span
-            class={`whitespace-nowrap rounded-full px-2 py-0.5 text-[0.7rem] font-semibold ${
-              entry.transcript
-                ? "border border-green-800/60 bg-green-950/40 text-green-400"
-                : "border border-brand-cream/20 bg-transparent text-brand-cream/40"
-            }`}
-          >
-            {entry.transcript ? "trascritto" : "in attesa"}
           </span>
-        </span>
-      </button>
+        </button>
+        <Button
+          onclick={() => handleRetry(entry)}
+          disabled={locked}
+          title={locked ? "Attendi la fine della registrazione o della trascrizione in corso" : undefined}
+        >
+          Rilancia
+        </Button>
+      </div>
     {/each}
   {/if}
 </div>

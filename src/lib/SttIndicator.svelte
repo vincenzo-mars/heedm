@@ -33,6 +33,11 @@ const STATUS: Record<SttStatus, { label: string; text: string; dot: string }> =
       text: "text-brand-cream",
       dot: "bg-red-400",
     },
+    stopped: {
+      label: "Server fermo",
+      text: "text-brand-cream",
+      dot: "bg-gray-400",
+    },
   };
 </script>
 

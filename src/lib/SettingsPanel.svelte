@@ -3,14 +3,24 @@ import { Folder, Mic, MonitorCheck, MonitorX, X } from "@lucide/svelte";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import type { DownloadProgress, SttSettings } from "./types";
+import type { DownloadProgress, SttSettings, SttStatus } from "./types";
 
 let {
   onClose,
   onSaved,
+  isRecording = false,
+  isTranscribing = false,
+  sttStatus,
+  onServerRefresh,
 }: {
   onClose: () => void;
   onSaved: (s: SttSettings) => void;
+  isRecording?: boolean;
+  isTranscribing?: boolean;
+  sttStatus: SttStatus;
+  onServerRefresh: (opts?: {
+    attemptStart?: boolean;
+  }) => Promise<SttSettings | null>;
 } = $props();
 
 let settings = $state<SttSettings | null>(null);
@@ -19,6 +29,8 @@ let dlProgress = $state<DownloadProgress | null>(null);
 let modelPath = $state<string | null>(null);
 let recordingsDir = $state<string | null>(null);
 let screenRecordingGranted = $state(false);
+let serverLoading = $state(false);
+let serverError = $state<string | null>(null);
 
 $effect(() => {
   invoke<SttSettings>("get_stt_settings").then((s) => {
@@ -51,6 +63,61 @@ async function save() {
   await invoke("save_stt_settings", { settings: updated });
   onSaved(updated);
   onClose();
+}
+
+async function handleStartServer() {
+  serverLoading = true;
+  serverError = null;
+  try {
+    await invoke("start_stt_server");
+    await onServerRefresh();
+  } catch (e) {
+    serverError = String(e);
+  } finally {
+    serverLoading = false;
+  }
+}
+
+async function handleRestartServer() {
+  serverLoading = true;
+  serverError = null;
+  try {
+    await invoke("restart_stt_server");
+    await onServerRefresh();
+  } catch (e) {
+    serverError = String(e);
+  } finally {
+    serverLoading = false;
+  }
+}
+
+async function handleStopServer() {
+  serverLoading = true;
+  serverError = null;
+  try {
+    await invoke("stop_stt_server");
+    await onServerRefresh({ attemptStart: false });
+  } catch (e) {
+    serverError = String(e);
+  } finally {
+    serverLoading = false;
+  }
+}
+
+async function handleDeleteModel() {
+  if (!settings) return;
+  serverLoading = true;
+  serverError = null;
+  try {
+    await invoke("delete_local_model");
+    await onServerRefresh();
+    onSaved(settings);
+    onClose();
+  } catch (e) {
+    serverError = String(e);
+  } finally {
+    serverLoading = false;
+  }
 }
 
 function revealRecordings() {
@@ -217,6 +284,63 @@ async function startDownload() {
                 ? "Scarica di nuovo"
                 : "Scarica"}
           </button>
+        </div>
+
+        <div class="flex flex-col gap-1.5">
+          <span class="text-[0.78rem] font-semibold text-brand-cream"
+            >Server STT</span
+          >
+
+          <div class="flex flex-col gap-2 rounded-lg border border-brand-cream/10 bg-brand-dark/50 px-2.5 py-2">
+            <div class="flex items-center justify-between">
+              <span class="text-[0.8rem] text-brand-cream/70">Stato:</span>
+              <span class={`text-[0.8rem] font-medium ${
+                sttStatus === "running" ? "text-green-400" : "text-brand-cream/60"
+              }`}>
+                {sttStatus === "running" ? "Attivo" : "Fermo"}
+              </span>
+            </div>
+
+            {#if serverError}
+              <p class="m-0 text-[0.75rem] text-red-400 leading-tight">
+                {serverError}
+              </p>
+            {/if}
+          </div>
+
+          <div class="flex flex-col gap-1.5">
+            <button
+              class="rounded-lg bg-brand-lighter px-3 py-2 text-[0.8rem] font-semibold text-brand-cream transition hover:bg-brand-lightest disabled:cursor-not-allowed disabled:bg-brand-light/30"
+              onclick={handleStartServer}
+              disabled={serverLoading || isRecording || isTranscribing}
+            >
+              {serverLoading ? "..." : "Avvia"}
+            </button>
+
+            <button
+              class="rounded-lg bg-brand-lighter px-3 py-2 text-[0.8rem] font-semibold text-brand-cream transition hover:bg-brand-lightest disabled:cursor-not-allowed disabled:bg-brand-light/30"
+              onclick={handleRestartServer}
+              disabled={serverLoading || isRecording || isTranscribing}
+            >
+              {serverLoading ? "..." : "Riavvia"}
+            </button>
+
+            <button
+              class="rounded-lg bg-brand-lighter px-3 py-2 text-[0.8rem] font-semibold text-brand-cream transition hover:bg-brand-lightest disabled:cursor-not-allowed disabled:bg-brand-light/30"
+              onclick={handleStopServer}
+              disabled={serverLoading || isRecording || isTranscribing}
+            >
+              {serverLoading ? "..." : "Spegni"}
+            </button>
+
+            <button
+              class="rounded-lg bg-red-600 px-3 py-2 text-[0.8rem] font-semibold text-brand-cream transition hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-red-600/30"
+              onclick={handleDeleteModel}
+              disabled={serverLoading || isRecording || isTranscribing}
+            >
+              {serverLoading ? "..." : "Elimina modello"}
+            </button>
+          </div>
         </div>
 
         <div class="flex flex-col gap-1.5">

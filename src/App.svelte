@@ -2,6 +2,7 @@
 import { List } from "@lucide/svelte";
 import { invoke } from "@tauri-apps/api/core";
 import Button from "./lib/Button.svelte";
+import Onboarding from "./lib/Onboarding.svelte";
 import RecordingDetail from "./lib/RecordingDetail.svelte";
 import RecordsList from "./lib/RecordsList.svelte";
 import SettingsPanel from "./lib/SettingsPanel.svelte";
@@ -21,29 +22,64 @@ let error = $state<string | null>(null);
 let isTranscribing = $state(false);
 let transcribeMs = $state(0);
 let sttStatus = $state<SttStatus>("checking");
+let modelReady = $state(false);
 let showSettings = $state(false);
 let view = $state<"record" | "list" | "detail">("record");
 let selectedEntry = $state<RecordingEntry | null>(null);
 
-$effect(() => {
-  invoke<SttSettings>("get_stt_settings").then((s) => {
-    if (!s.configured) showSettings = true;
-    ensureServer();
-  });
+// Gate per registrazione e import: senza server whisper attivo e modello sul
+// disco, `transcribe_recording` non può funzionare. Lo stesso controllo è
+// applicato anche lato backend (start_recording/import_audio_file), qui serve
+// solo a riflettersi in UI.
+let canRecord = $derived(sttStatus === "running" && modelReady);
+let recordGateReason = $derived.by(() => {
+  if (canRecord) return null;
+  if (!modelReady)
+    return "Scarica il modello dalle impostazioni per registrare.";
+  return "Avvia il server whisper dalle impostazioni per registrare.";
 });
 
-async function ensureServer() {
+$effect(() => {
+  refreshSttState();
+});
+
+// Punto unico di riallineamento fra stato reale (whisper-server + modello sul
+// disco) e stato mostrato in UI. Chiamata da qui al mount e da SettingsPanel
+// dopo un salvataggio; i task futuri (onboarding post-download, stop/restart/
+// delete dalle impostazioni, rilancio trascrizione) devono passare da qui
+// invece di duplicare la logica di check/avvio.
+// `attemptStart: false` serve a chi ha appena fermato il server di proposito
+// (T5): senza, il check troverebbe "stopped" e lo riavvierebbe subito.
+async function refreshSttState(
+  opts: { attemptStart?: boolean } = {},
+): Promise<SttSettings | null> {
+  const attemptStart = opts.attemptStart ?? true;
+  sttStatus = "checking";
   try {
+    const settings = await invoke<SttSettings>("get_stt_settings");
+    modelReady = settings.localReady;
     const status = await invoke<string>("check_stt_server");
     if (status === "running") {
       sttStatus = "running";
-      return;
+      return settings;
+    }
+    if (!attemptStart) {
+      sttStatus = "stopped";
+      return settings;
+    }
+    if (!modelReady) {
+      // Senza modello whisper-server fallirebbe comunque all'avvio: risparmia
+      // il giro e riflette subito lo stato reale.
+      sttStatus = "error";
+      return settings;
     }
     sttStatus = "starting";
     await invoke("start_stt_server");
     sttStatus = "running";
+    return settings;
   } catch {
     sttStatus = "error";
+    return null;
   }
 }
 
@@ -71,6 +107,10 @@ $effect(() => {
 async function handleImport() {
   error = null;
   if (isRecording || isTranscribing) return;
+  if (!canRecord) {
+    error = recordGateReason;
+    return;
+  }
   try {
     const path = await invoke<string | null>("import_audio_file");
     if (!path) return;
@@ -89,6 +129,10 @@ async function handleImport() {
 async function handleRecord() {
   error = null;
   if (!isRecording) {
+    if (!canRecord) {
+      error = recordGateReason;
+      return;
+    }
     try {
       await invoke("start_recording");
       isRecording = true;
@@ -115,11 +159,42 @@ async function handleRecord() {
 }
 
 function handleSettingsSaved(_s: SttSettings) {
-  sttStatus = "checking";
-  ensureServer();
+  refreshSttState();
+}
+
+// Rilancio trascrizione da RecordsList/RecordingDetail: riusa lo stesso lock
+// `isTranscribing` del flusso REC/import (blocca REC e le altre righe), poi
+// ricarica `list_recordings` come unica fonte di verità (niente stato locale
+// scollegato dal disco) e, se il record rilanciato è quello aperto in
+// dettaglio, riallinea `selectedEntry` così `RecordingDetail` non resta stale.
+async function retryTranscription(
+  folderPath: string,
+): Promise<RecordingEntry[]> {
+  if (isRecording || isTranscribing) return [];
+  isTranscribing = true;
+  try {
+    await invoke("transcribe_recording", {
+      path: `${folderPath}/recording.wav`,
+    });
+  } catch {
+    // Esito già persistito su disco da transcribe_recording (transcript.json
+    // o transcript_error.json): list_recordings sotto lo riflette da solo.
+  } finally {
+    isTranscribing = false;
+  }
+  const entries = await invoke<RecordingEntry[]>("list_recordings");
+  if (selectedEntry) {
+    selectedEntry =
+      entries.find((e) => e.folder_path === selectedEntry?.folder_path) ??
+      selectedEntry;
+  }
+  return entries;
 }
 </script>
 
+{#if !modelReady}
+  <Onboarding onContinue={() => refreshSttState()} />
+{:else}
 <div
   class="flex h-screen flex-col items-center gap-8 overflow-y-auto px-6 pt-6 pb-18 box-border"
 >
@@ -138,12 +213,14 @@ function handleSettingsSaved(_s: SttSettings) {
       class="flex flex-1 flex-col items-center justify-center gap-6 text-center"
     >
       <button
-        class={`h-30 w-30 cursor-pointer rounded-full border-none text-base font-bold text-brand-cream transition-[background,box-shadow,transform] duration-200 active:scale-[0.96] ${
+        class={`h-30 w-30 cursor-pointer rounded-full border-none text-base font-bold text-brand-cream transition-[background,box-shadow,transform] duration-200 active:scale-[0.96] disabled:cursor-default disabled:opacity-50 ${
           isRecording
             ? "animate-[pulse-rec_1.5s_ease-in-out_infinite] bg-brand-lightest shadow-[0_4px_16px_rgba(210,52,52,0.4)]"
             : "bg-brand-lighter shadow-[0_4px_16px_rgba(171,43,41,0.4)] hover:bg-brand-lightest"
         }`}
         onclick={handleRecord}
+        disabled={!isRecording && !canRecord}
+        title={!isRecording && !canRecord ? recordGateReason : undefined}
         aria-label={isRecording ? "Stop recording" : "Start recording"}
       >
         {isRecording ? "■ STOP" : "⬤ REC"}
@@ -153,12 +230,16 @@ function handleSettingsSaved(_s: SttSettings) {
         <button
           class="cursor-pointer border-none bg-transparent text-sm text-brand-cream/70 underline underline-offset-4 transition-colors hover:text-brand-cream disabled:cursor-default disabled:opacity-50"
           onclick={handleImport}
-          disabled={isTranscribing}
+          disabled={isTranscribing || !canRecord}
+          title={!canRecord ? recordGateReason : undefined}
         >
           o carica un file
         </button>
       {/if}
 
+      {#if !isRecording && !canRecord}
+        <p class="m-0 max-w-95 text-[0.85rem] text-brand-cream/50">{recordGateReason}</p>
+      {/if}
       {#if isRecording}
         <p class="m-0 font-mono text-2xl font-semibold text-brand-lightest">
           {formatDuration(durationMs)}
@@ -183,6 +264,9 @@ function handleSettingsSaved(_s: SttSettings) {
         onBack={() => {
           view = "record";
         }}
+        {isRecording}
+        {isTranscribing}
+        onRetry={retryTranscription}
       />
     </main>
   {:else if view === "detail" && selectedEntry}
@@ -192,6 +276,9 @@ function handleSettingsSaved(_s: SttSettings) {
         onBack={() => {
           view = "list";
         }}
+        {isRecording}
+        {isTranscribing}
+        onRetry={retryTranscription}
       />
     </main>
   {/if}
@@ -199,6 +286,14 @@ function handleSettingsSaved(_s: SttSettings) {
   <SttIndicator status={sttStatus} onSettingsClick={() => (showSettings = true)} />
 
   {#if showSettings}
-    <SettingsPanel onClose={() => (showSettings = false)} onSaved={handleSettingsSaved} />
+    <SettingsPanel
+      onClose={() => (showSettings = false)}
+      onSaved={handleSettingsSaved}
+      {isRecording}
+      {isTranscribing}
+      {sttStatus}
+      onServerRefresh={refreshSttState}
+    />
   {/if}
 </div>
+{/if}
