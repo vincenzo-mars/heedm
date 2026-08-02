@@ -64,6 +64,10 @@ mic_native_rate → 16kHz             │  sys arriva già a TARGET_SAMPLE_RATE
 
 Il downmix a mono è voluto e va tenuto: i canali L/R di un file esterno (un export Zoom, un mp3) non sono "io" e "gli altri", sono solo stereo. Lasciarli separati farebbe produrre a whisper etichette speaker casuali. Essendo mono, `diarize` viene ignorato dal server e `speaker` resta `None`.
 
+### Guardia STT: `ensure_stt_ready`
+
+`start_recording` e `import_audio_file` condividono `ensure_stt_ready(&AppHandle)` (`commands/recording.rs`): entrambe finiscono in `transcribe_recording`, quindi entrambe rifiutano di partire (`Err` in italiano) se il modello non esiste sul path atteso (`local_model_path`) o se `check_stt_server` non ritorna `"running"`. È lo stesso controllo già applicato lato UI (`App.svelte`, `canRecord`), ripetuto qui per il caso in cui il frontend sia disallineato: una chiamata `invoke` diretta o una race sullo stato non bypassano il gate. Non tenta di avviare il server al posto dell'utente: se è stato fermato di proposito dalle impostazioni, resta fermo finché non lo riavvia lui.
+
 ## Registrazione
 
 ### Stato (`recorder/mod.rs`)
@@ -119,7 +123,13 @@ Limiti: copre il percorso di eco diretto dominante, non il riverbero multi-path,
 
 `whisper-server` (whisper.cpp) è compilato da `scripts/build-whisper-server.sh` come binario universale macOS (arm64 + x86_64), statico e con Metal attivo, e finisce in `src-tauri/binaries/`. Tauri lo bundla come risorsa (`tauri.conf.json` → `bundle.resources`) e a runtime `bundled_bin_path` lo risolve con `app.path().resolve(..., BaseDirectory::Resource)`.
 
-Il modello **non** è bundled: `download_local_model` scarica `ggml-large-v3-turbo.bin` (~1.5 GB) da Hugging Face in streaming, emettendo eventi `download-progress` con payload `{ step: "model" | "done", pct }`, e a fine download imposta `local_ready` nelle settings.
+Il modello **non** è bundled: `download_local_model` scarica `ggml-large-v3-turbo.bin` (~1.5 GB) da Hugging Face in streaming, emettendo eventi `download-progress` con payload `{ step: "model" | "done", pct }`.
+
+Il download scrive su un file temporaneo `<model>.bin.part` nella stessa cartella del modello finale, e fa `rename` atomico al path definitivo solo a stream completato con successo. Se lo stream fallisce (rete, chiusura app a metà) il `.part` viene ripulito con un `remove_file` best-effort prima di propagare l'errore; se l'app crasha invece di uscire in modo pulito, il `.part` può restare orfano ma non interferisce mai con `model.exists()` sul path finale, quindi non appare mai come modello valido.
+
+### Stato del modello: riconciliato col disco, non col flag salvato
+
+`SttSettings.local_ready` è persistito in `settings.json`, ma non è la fonte di verità: `get_stt_settings` lo ricalcola a ogni chiamata verificando se il file del modello esiste realmente sul path atteso (`local_model_path`), ignorando il valore letto dal JSON. Questo copre due casi che il flag salvato da solo non gestirebbe: l'utente che cancella il `.bin` a mano, e un download interrotto che grazie al file temporaneo non lascia comunque un `.bin` valido. Il valore scritto da `download_local_model` a fine download resta nel file per compatibilità ma è puramente informativo: chiunque legga lo stato via `get_stt_settings` vede sempre la realtà del filesystem.
 
 ### Ciclo di vita del server
 
@@ -132,6 +142,8 @@ Il modello **non** è bundled: `download_local_model` scarica `ggml-large-v3-tur
 
 Flash attention e numero di thread non hanno UI: si deducono dalla macchina (`available_parallelism` meno due, per lasciare respiro al resto del sistema). `--flash-attn` esiste solo dalle build recenti di whisper.cpp, quindi il tag pinnato in `scripts/build-whisper-server.sh` e i flag passati qui devono restare allineati: passare `-fa` a un binario vecchio lo fa uscire con un errore di parsing.
 
+`stop_local_server` (condivisa da `stop_stt_server`, `restart_stt_server` e `delete_local_model`) estrae il `Child` da `WhisperServerState` tenendo il `MutexGuard` solo per il `take()`, mai attraverso un `.await`: poi killa e attende il processo, e infine polla la porta 8080 ogni secondo (timeout 5s) finché non risulta libera, perché il socket può restare occupato un istante dopo che `wait()` è tornato. Se `WhisperServerState` è già vuoto ma la porta risulta comunque aperta (un whisper-server orfano da una sessione precedente, non tracciato da questo processo), la funzione non tenta di killare nulla per porta: ritorna un errore esplicito che chiede di chiudere il processo a mano. `restart_stt_server` è `stop_local_server` + `start_local_server`: se lo stop fallisce (incluso il caso orfano), il restart fallisce con lo stesso errore. `delete_local_model` ferma il server prima di cancellare il file (il processo lo tiene aperto) e propaga lo stesso errore se lo stop fallisce.
+
 In `lib.rs` l'app è costruita con `.build()` invece di `.run()` diretto, così il loop eventi può intercettare `RunEvent::ExitRequested` e terminare il figlio, altrimenti `whisper-server` resterebbe in background dopo il quit.
 
 ### Trascrizione
@@ -139,6 +151,14 @@ In `lib.rs` l'app è costruita con `.build()` invece di `.run()` diretto, così 
 `transcribe_recording` legge il WAV e lo invia in multipart a `POST /inference` con `language=it`, `response_format=verbose_json` e `diarize=true`. Il file **non** viene convertito: quello che Heedm produce è già mono/stereo 16kHz 16-bit PCM, cioè esattamente ciò che `read_wav` accetta.
 
 Il risultato viene arricchito con `transcription_ms` (misurato lato client, non presente nella risposta del server) e scritto come `transcript.json` accanto al WAV.
+
+### Stato "fallito": `transcript_error.json`
+
+`transcribe_recording` (il comando Tauri, non `run_transcription` che ne contiene la logica) avvolge l'intera chiamata: se il risultato è `Err`, scrive `{ "message": <errore> }` in `transcript_error.json` nella stessa cartella del WAV; se è `Ok`, rimuove quel file se presente. Questo copre sia il primo tentativo (es. whisper-server giù, JSON malformato) sia un rilancio: un rilancio riuscito su un record già segnato come fallito cancella la traccia d'errore, altrimenti resterebbe segnato "fallito" nonostante un `transcript.json` valido.
+
+`list_recordings` legge `transcript_error.json` solo quando `transcript.json` non è presente (i due non dovrebbero mai coesistere, ma se coesistessero il transcript vince). Il messaggio letto popola `RecordingEntry.error`, da cui il frontend deriva un terzo stato (`TranscriptStatus`, vedi [`reference.md`](reference.md)) oltre a "trascritto"/"in attesa".
+
+Il rilancio non ha un comando dedicato: è lo stesso `transcribe_recording(path)`, richiamato con `<folder_path>/recording.wav` dal frontend (`App.svelte`, `retryTranscription`).
 
 ### Diarizzazione: la fa il server
 
@@ -154,9 +174,9 @@ Verificato empiricamente: due voci distinte su canali separati escono correttame
 
 ## Stato persistente
 
-- `settings.json` — `SttSettings` serializzato in `app_data_dir/`
-- `app_data_dir/models/ggml-large-v3-turbo.bin` — il modello
-- `~/Documents/Heedm/Records/<timestamp>/` — `recording.wav` + `transcript.json`
+- `settings.json` — `SttSettings` serializzato in `app_data_dir/` (`local_ready` è solo l'ultimo valore noto, vedi sopra)
+- `app_data_dir/models/ggml-large-v3-turbo.bin` — il modello; `ggml-large-v3-turbo.bin.part` può comparire durante un download, sempre transitorio
+- `~/Documents/Heedm/Records/<timestamp>/` — `recording.wav` + `transcript.json` (successo) oppure `transcript_error.json` (ultimo tentativo fallito, rimosso al primo rilancio riuscito)
 
 ## Dipendenze chiave
 

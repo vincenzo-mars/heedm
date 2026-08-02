@@ -13,6 +13,36 @@ Formato:
 
 ---
 
+## 2026-07-31 — Ciclo di vita STT: onboarding obbligatorio, gate registrazione, controlli server, rilancio trascrizione
+
+**Obiettivo:** quattro buchi collegati nel ciclo di vita di whisper-server e del modello locale: si poteva premere REC/importare senza server o modello pronti; il primo avvio apriva solo un modal impostazioni invece di un onboarding vero; non c'era modo di fermare/riavviare/eliminare il server o il modello dall'app; un errore di trascrizione non lasciava traccia e non si poteva rilanciare senza una nuova registrazione.
+
+**Fatto (backend, `src-tauri/src/commands/`):**
+- `get_stt_settings` ricalcola `local_ready` a ogni chiamata verificando il file sul disco (`local_model_path(...).exists()`), invece di fidarsi del flag persistito in `settings.json`
+- `download_local_model` scrive su `<model>.bin.part` e fa `rename` atomico al path finale solo a download completato; su errore il `.part` viene ripulito
+- Nuovi comandi in `stt.rs`: `stop_stt_server`, `restart_stt_server`, `delete_local_model`, sopra una `stop_local_server` condivisa che non tiene il `MutexGuard` di `WhisperServerState` oltre un `.await`, e che polla il rilascio della porta 8080 (timeout 5s) prima di ritornare
+- Nuova `ensure_stt_ready(&AppHandle)` in `recording.rs`, condivisa da `start_recording` (che guadagna il parametro `app: AppHandle`) e `import_audio_file`: blocca con `Err` se modello o server non sono pronti, senza mai tentare un auto-riavvio
+- `transcribe_recording` avvolge la logica precedente (rinominata `run_transcription`): su `Err` scrive `transcript_error.json` (`TranscriptError { message }`) accanto al WAV, su `Ok` lo rimuove se presente (copre il rilancio riuscito). `RecordingEntry` guadagna `error: Option<String>`, popolato da `list_recordings` solo quando `transcript.json` è assente
+
+**Fatto (frontend, `src/`):**
+- Nuovo `Onboarding.svelte`: view full-screen (non un modal) con logo, CTA download, progress bar (stesso evento `download-progress`/comando `download_local_model` di `SettingsPanel`), messaggio "caffè" durante il download, messaggio finale + "Continua". `App.svelte` la mostra al posto della UI normale quando `!modelReady`, sostituendo la vecchia `if (!s.configured) showSettings = true`: primo avvio e "modello eliminato in seguito" sono lo stesso caso, un solo ramo, nessun bottone "salta"
+- `App.svelte`: `refreshSttState(opts?: { attemptStart?: boolean })` come punto unico di riallineamento fra stato reale e UI (usata da mount, `Onboarding`, `SettingsPanel`, rilancio trascrizione); `canRecord`/`recordGateReason` derivati per il gate REC/import (REC disabilitato solo per l'avvio, lo STOP resta sempre possibile); `retryTranscription(folderPath)` riusa lo stesso lock `isTranscribing` di REC/import (nessun flag secondario) e ricarica `list_recordings` come unica fonte di verità dopo un rilancio, riallineando `selectedEntry`
+- `SettingsPanel.svelte`: nuova sezione server STT con Avvia/Riavvia/Spegni/Elimina modello. Riceve `sttStatus` e `onServerRefresh` (= `refreshSttState` di `App.svelte`) come prop: ogni azione richiama `onServerRefresh` (con `attemptStart: false` per "Spegni") invece di tenere una copia locale dello stato, altrimenti chiudere il modal con la X invece che con "Salva" avrebbe lasciato `App.svelte` con lo stato stale
+- `RecordsList.svelte`/`RecordingDetail.svelte`: badge a 3 stati (`TranscriptStatus` in `types.ts`) e bottone "Rilancia"/"Rilancia trascrizione", disponibile anche su record già trascritti (non solo falliti). Riga di `RecordsList` ristrutturata da bottone unico a `<div>` con `<button>` (select) + `Button` (rilancia) separati, per evitare il nesting di bottoni
+
+**Decisioni:**
+- **`local_ready` persistito è informativo, non autoritativo**; niente flag "onboarding fatto" separato: la presenza del `.bin` sul disco è l'unica verità, anche per "utente cancella il modello a mano" (che riporta a `Onboarding`)
+- **Nessun comando `get_model_status`/nuovo endpoint per lo stato server**: `get_stt_settings`/`check_stt_server` esistenti bastano, riletti al momento giusto
+- **Caso orfano (porta 8080 occupata da un processo non tracciato) non viene killato per porta**: `stop_local_server` ritorna un errore esplicito piuttosto che rischiare di terminare un processo di terze parti
+- **Un solo lock globale (`isTranscribing`) per registrazione, import e rilancio**: si escludono a vicenda, nessun flag secondario per "rilancio in corso"
+- **Stato condiviso frontend centralizzato in `App.svelte` con props/callback**, nessun nuovo modulo di state management: prima astrazione di questo tipo nel progetto, scartata perché non necessaria per 4-5 valori di stato
+
+**Verificato:** `cargo check` e `npm run typecheck` puliti su tutto il lotto, `npm run lint:fix` senza modifiche fuori scope. **Non verificato end-to-end**: in questo ambiente `whisper-server` crasha al caricamento del modello (`unknown tensor '' in model file`, `GGML_ASSERT` in `ggml-metal-device.m`), problema di ambiente preesistente e indipendente da queste modifiche (probabile mismatch fra la versione di whisper.cpp con cui è compilato il binario e quella con cui è stato generato il modello scaricato). Bloccava anche il test visivo dell'onboarding/gate/rilancio con screenshot reale (permesso Screen Recording non concesso al terminale).
+
+**Prossimi passi:** risolvere il mismatch whisper-server/modello (probabile ricompilazione con `scripts/build-whisper-server.sh` o ri-scaricamento del modello), poi eseguire la skill `fresh-install` per la verifica end-to-end completa (onboarding da stato vergine, smoke test record→transcribe, rilancio riuscito).
+
+---
+
 ## 2026-07-31 — Skill `fresh-install`: test da stato vergine
 
 **Obiettivo:** poter provare l'app come la vede chi la installa per la prima volta, in modo ripetibile.

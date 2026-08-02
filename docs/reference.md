@@ -11,7 +11,7 @@ Registrati in `lib.rs` con il percorso completo del modulo: la macro `generate_h
 
 | Command | Input | Output | Effetti |
 |---|---|---|---|
-| `get_stt_settings` | — | `SttSettings` | Legge `settings.json`, ritorna il default se assente |
+| `get_stt_settings` | — | `SttSettings` | Legge `settings.json` (default se assente), poi ricalcola `local_ready` verificando `local_model_path` sul disco: il flag persistito non è mai la fonte di verità |
 | `save_stt_settings` | `settings: SttSettings` | `Result<(), String>` | Scrive `settings.json` |
 | `get_local_model_path` | — | `String` | Path assoluto del modello; crea la cartella padre così "Mostra nel Finder" funziona anche prima del download |
 | `get_recordings_dir` | — | `String` | Path assoluto della cartella registrazioni, creata se assente |
@@ -22,20 +22,23 @@ Gli helper di percorso (`model_dir`, `local_model_path`, `recordings_dir`, `bund
 
 | Command | Input | Output | Effetti |
 |---|---|---|---|
-| `download_local_model` | — | `Result<(), String>` | Scarica il modello in streaming, emette `download-progress`, aggiorna `local_ready` |
+| `download_local_model` | — | `Result<(), String>` | Scarica il modello in streaming su `<model>.bin.part`, emette `download-progress`, fa rename atomico a fine download e aggiorna `local_ready` (informativo, vedi sopra) |
 | `start_stt_server` | — | `Result<(), String>` | Spawna `whisper-server` se la porta è libera, attende fino a 60s |
+| `stop_stt_server` | — | `Result<(), String>` | Killa il processo tracciato, attende che la porta 8080 si liberi (timeout 5s). Errore esplicito se la porta è occupata da un processo non tracciato (orfano) |
+| `restart_stt_server` | — | `Result<(), String>` | `stop_stt_server` + `start_stt_server`; fallisce con lo stesso errore se lo stop fallisce |
+| `delete_local_model` | — | `Result<(), String>` | Ferma il server (il processo tiene il `.bin` aperto), poi cancella il file del modello. Errore se lo stop fallisce |
 | `check_stt_server` | — | `String` | `"running"` oppure `"stopped"` |
-| `transcribe_recording` | `path: String` | `Result<TranscriptResult, String>` | POST a `/inference`, scrive `transcript.json` accanto al WAV |
+| `transcribe_recording` | `path: String` | `Result<TranscriptResult, String>` | POST a `/inference`, scrive `transcript.json` accanto al WAV; su errore scrive `transcript_error.json` (sidecar `{ message }`), su successo lo rimuove se presente. Riusata anche per il rilancio: nessuna firma dedicata |
 
 ### Registrazione (`commands/recording.rs`)
 
 | Command | Input | Output | Effetti |
 |---|---|---|---|
-| `start_recording` | — | `Result<(), String>` | Avvia mic e audio di sistema; errore se già in corso |
+| `start_recording` | — | `Result<(), String>` | Errore se già in corso, oppure se il modello non è scaricato o whisper-server non è in esecuzione (vedi `ensure_stt_ready` in [`architecture.md`](architecture.md)); altrimenti avvia mic e audio di sistema |
 | `stop_recording` | — | `Result<String, String>` | Ferma, applica AEC, scrive il WAV, ritorna il path |
 | `get_recording_status` | — | `Result<RecordingStatus, String>` | Flag e durata corrente |
-| `list_recordings` | — | `Result<Vec<RecordingEntry>, String>` | Scansiona la cartella Records, ordina per nome decrescente |
-| `import_audio_file` | — | `Result<Option<String>, String>` | Picker, decodifica, salva come registrazione. `None` se annullato |
+| `list_recordings` | — | `Result<Vec<RecordingEntry>, String>` | Scansiona la cartella Records, ordina per nome decrescente. `error` (messaggio da `transcript_error.json`) è letto solo quando `transcript` è assente |
+| `import_audio_file` | — | `Result<Option<String>, String>` | Stessa guardia `ensure_stt_ready` di `start_recording`; poi picker, decodifica, salva come registrazione. `None` se annullato |
 
 ### Permessi OS (`commands/mod.rs` + `permissions.rs`)
 
@@ -56,7 +59,13 @@ Per il microfono non c'è un check di stato: l'unica API è `AVCaptureDevice.aut
 
 ## Tipi condivisi (`src/lib/types.ts`)
 
-`SttSettings`, `RecordingStatus`, `RecordingEntry`, `TranscriptResult`, `TranscriptSegment`, `DownloadProgress`, `SttStatus`.
+`SttSettings`, `RecordingStatus`, `RecordingEntry`, `TranscriptResult`, `TranscriptSegment`, `DownloadProgress`, `SttStatus`, `TranscriptStatus`.
+
+`SttStatus` = `"checking" | "starting" | "running" | "error" | "stopped"`. `"stopped"` è distinto da `"error"`: è l'esito di uno stop esplicito (impostazioni), non di un fallimento.
+
+`RecordingEntry.error: string | null` è il messaggio dell'ultimo fallimento di trascrizione (da `transcript_error.json`), sempre `null` quando `transcript` è presente.
+
+`TranscriptStatus` = `"transcribed" | "pending" | "failed"`, stato derivato (non un campo persistito) di una `RecordingEntry`: da non confondere con `RecordingStatus`, che è lo stato della registrazione in corso (`get_recording_status`).
 
 Helper di presentazione nello stesso file:
 
@@ -67,6 +76,8 @@ Helper di presentazione nello stesso file:
 | `formatDuration(ms)` | `hh:mm:ss`, per il cronometro di registrazione |
 | `formatSeconds(s)` | `m:ss`, per i timestamp dei segmenti |
 | `formatElapsed(ms)` | `12.4s` sotto il minuto, poi `m:ss` |
+| `transcriptStatus(entry)` | `RecordingEntry` → `TranscriptStatus` (`transcript` presente → `"transcribed"`, altrimenti `error` presente → `"failed"`, altrimenti `"pending"`) |
+| `transcriptStatusInfo(entry)` | `transcriptStatus(entry)` → `{ label, className }` per il badge a 3 stati di `RecordsList` |
 
 ## Componenti Svelte
 
@@ -74,14 +85,24 @@ Svelte 5 con le rune (`$state`, `$derived`, `$effect`, `$props`), un componente 
 
 ### `App.svelte` (root)
 
-Stato: `isRecording`, `durationMs`, `error`, `isTranscribing`, `transcribeMs`, `sttStatus`, `showSettings`, `view` (`"record" | "list" | "detail"`), `selectedEntry`.
+Stato: `isRecording`, `durationMs`, `error`, `isTranscribing`, `transcribeMs`, `sttStatus`, `modelReady`, `showSettings`, `view` (`"record" | "list" | "detail"`), `selectedEntry`.
+
+`canRecord = $derived(sttStatus === "running" && modelReady)` è il gate lato UI per registrazione e import (rispecchia `ensure_stt_ready` lato backend, vedi [`architecture.md`](architecture.md)); `recordGateReason` (`$derived.by`) è il messaggio in italiano da mostrare quando `!canRecord`, che distingue "modello non scaricato" da "server non attivo". Quando `!canRecord`: il bottone REC resta abilitato per lo STOP (non blocca una registrazione già in corso) ma non per l'avvio, il bottone "o carica un file" è disabilitato, entrambi mostrano `recordGateReason` come `title`, e lo stesso testo appare come paragrafo visibile sotto i bottoni. `handleRecord`/`handleImport` ripetono il controllo su `canRecord` anche a runtime (non solo sull'attributo `disabled`), per coerenza con la guardia backend.
+
+`refreshSttState(opts?: { attemptStart?: boolean }): Promise<SttSettings | null>` è il punto unico di riallineamento fra stato reale (whisper-server + modello sul disco) e stato mostrato in UI: legge `get_stt_settings` (aggiorna `modelReady` da `localReady`) e `check_stt_server`, poi imposta `sttStatus` di conseguenza (`"checking"` mentre gira, poi `"running"` / `"stopped"` / `"starting"`→`"running"` / `"error"`). Con `attemptStart: true` (default) un server non in esecuzione viene avviato, come oggi al mount; con `attemptStart: false` un server fermo resta `"stopped"` invece di essere riavviato automaticamente, il caso di chi lo ha appena fermato di proposito dalle impostazioni. Ritorna le `SttSettings` lette (o `null` in errore) così il chiamante può leggere anche `configured` senza un secondo giro. È chiamata al mount, da `handleSettingsSaved` e dalla `onContinue` di `Onboarding`; chiunque cambi lo stato del server o del modello (impostazioni, rilancio trascrizione) la richiama invece di duplicare la logica di check/avvio. Passata ai figli come callback: a `SettingsPanel` direttamente come `onServerRefresh` (richiamata dopo ogni azione sul server) e indirettamente via `onSaved` (richiamata da `handleSettingsSaved` dopo un salvataggio); a `Onboarding` direttamente come `onContinue`.
+
+Rendering condizionato da `modelReady`, valutato allo stesso modo indipendentemente dal motivo per cui il modello manca (primo avvio mai configurato, o modello eliminato in un secondo momento dalle impostazioni): se `!modelReady` l'intera UI normale è sostituita da `Onboarding` a schermo intero, nessun ramo separato per i due casi.
 
 Flusso:
-1. Mount → `get_stt_settings`; se non configurato apre le impostazioni, poi `ensureServer()`
-2. REC → `start_recording`, poi polling di `get_recording_status` ogni 500ms per il cronometro
-3. STOP → `stop_recording` → `transcribe_recording`
-4. "o carica un file" (solo a riposo) → `import_audio_file` → `transcribe_recording` → vista lista
-5. Bottone lista in alto a destra → `RecordsList` → click su una entry → `RecordingDetail`
+1. Mount → `refreshSttState()`; se `!modelReady` si mostra `Onboarding` al posto della UI normale
+2. `Onboarding` scarica il modello e a fine download invoca `onContinue` → `refreshSttState()` → `modelReady` torna `true` → si torna automaticamente alla UI normale
+3. REC → `start_recording`, poi polling di `get_recording_status` ogni 500ms per il cronometro
+4. STOP → `stop_recording` → `transcribe_recording`
+5. "o carica un file" (solo a riposo) → `import_audio_file` → `transcribe_recording` → vista lista
+6. Bottone lista in alto a destra → `RecordsList` → click su una entry → `RecordingDetail`
+7. Rilancio trascrizione (da `RecordsList` o `RecordingDetail`) → `retryTranscription(folderPath)`
+
+`retryTranscription(folderPath: string): Promise<RecordingEntry[]>` è la callback passata a `RecordsList` e `RecordingDetail` come `onRetry`. Riusa lo stesso `isTranscribing` del flusso REC/import (nessun secondo flag): se `isRecording || isTranscribing` è già vero esce subito senza fare nulla (guardia ridondante rispetto al `disabled` dei bottoni, stesso pattern di `handleImport`/`handleRecord`). Altrimenti mette `isTranscribing = true`, chiama `transcribe_recording` su `<folderPath>/recording.wav` ignorando un eventuale errore (già persistito su disco da `transcribe_recording` come `transcript.json` o `transcript_error.json`, non serve duplicarlo nel banner `error` della vista REC), poi in ogni caso rimette `isTranscribing = false`. A quel punto richiama `list_recordings` (unica fonte di verità, nessun refresh locale scollegato dal backend) e, se `selectedEntry` è impostato, lo riallinea con l'entry corrispondente nell'array appena letto — così `RecordingDetail`, se aperto sul record rilanciato, non resta con una prop stale. Ritorna l'array fresco: `RecordsList` lo usa per aggiornare la propria lista, `RecordingDetail` lo ignora (il suo aggiornamento passa da `selectedEntry`).
 
 ### `SttIndicator.svelte`
 
@@ -93,16 +114,45 @@ Due elementi flottanti in basso: il pulsante impostazioni a destra e la pillola 
 | `starting` | ambra lampeggiante | "Avvio server..." |
 | `running` | verde | "Server attivo" |
 | `error` | rosso | "Server non disponibile" |
+| `stopped` | grigio fisso | "Server fermo" |
 
 Il colore semantico vive solo sul dot: il testo resta `brand-cream` per uniformità.
 
+### `Onboarding.svelte`
+
+View a schermo intero (non un modal), mostrata da `App.svelte` al posto della UI normale quando `!modelReady`. Logo (`public/icon.png`), titolo e sottotitolo fissi, poi tre stati in sequenza: CTA "Scarica il modello" → progress bar sull'evento `download-progress` (stesso comando `download_local_model` e stesso evento di `SettingsPanel`) con il messaggio "prenditi un caffè" visibile solo mentre `downloading` è vero → messaggio finale e bottone "Continua". Nessun bottone "salta": l'unica uscita è un download riuscito.
+
+Prop: `onContinue: () => void`, chiamata dal bottone "Continua"; `App.svelte` la collega a `refreshSttState()` così `modelReady` si aggiorna e il rendering torna da solo alla UI normale, senza che `Onboarding` gestisca la propria visibilità.
+
 ### `SettingsPanel.svelte`
 
-Modal con permessi OS, download del modello e percorsi. Contenitore `max-h-[85vh]` con il corpo scrollabile: header e bottone Salva restano fissi. La sezione permessi viene per prima perché blocca tutto il resto.
+Modal con permessi OS, download del modello, controllo server STT e percorsi. Contenitore `max-h-[85vh]` con il corpo scrollabile: header e bottone Salva restano fissi. La sezione permessi viene per prima perché blocca tutto il resto.
+
+Prop:
+- `onClose: () => void` — callback per chiudere il modal
+- `onSaved: (s: SttSettings) => void` — callback invocata dopo salvataggio delle impostazioni e dopo eliminazione del modello (chiude il modal automaticamente)
+- `isRecording?: boolean` — disabilita i bottoni del server se in corso una registrazione
+- `isTranscribing?: boolean` — disabilita i bottoni del server se in corso una trascrizione
+- `sttStatus: SttStatus` — stato del server, passato da `App.svelte` (fonte di verità unica, non duplicato localmente)
+- `onServerRefresh: (opts?: { attemptStart?: boolean }) => Promise<SttSettings | null>` — `refreshSttState` di `App.svelte`, passata by reference: ogni azione sul server la richiama per riallineare lo stato condiviso (gate REC, `SttIndicator`) invece di tenere una copia locale che si disallineerebbe alla chiusura del modal con la X
+
+Sezione server STT: mostra lo stato attuale (`"Attivo"` se `sttStatus === "running"`, `"Fermo"` altrimenti) e quattro bottoni:
+- **Avvia**: chiama `start_stt_server`, poi `onServerRefresh()`
+- **Riavvia**: chiama `restart_stt_server`, poi `onServerRefresh()`
+- **Spegni**: chiama `stop_stt_server`, poi `onServerRefresh({ attemptStart: false })` (NON riavvia automaticamente)
+- **Elimina modello**: chiama `delete_local_model`, poi `onServerRefresh()` (aggiorna `modelReady` a `false`, che fa ricomparire `Onboarding` in `App.svelte`) e infine `onSaved`/`onClose` per chiudere il modal
+
+Tutti i bottoni rimangono `disabled` durante `serverLoading`, registrazione o trascrizione. Se un comando fallisce, l'errore è mostrato in rosso nella card di stato.
 
 ### `RecordsList.svelte`, `RecordingDetail.svelte`, `TranscriptView.svelte`
 
-Lista delle registrazioni con badge "trascritto"/"in attesa" e tempo di trascrizione; dettaglio con reveal della cartella; rendering della trascrizione raggruppata per speaker con barra colorata a sinistra.
+Lista delle registrazioni con badge a 3 stati ("trascritto"/"in attesa"/"fallito", da `transcriptStatusInfo`) e tempo di trascrizione; dettaglio con reveal della cartella; rendering della trascrizione raggruppata per speaker con barra colorata a sinistra.
+
+Prop condivise da `RecordsList` e `RecordingDetail`: `isRecording: boolean`, `isTranscribing: boolean` (lock globale passato da `App.svelte`, combinati in un `locked = $derived(...)` locale) e `onRetry: (folderPath: string) => Promise<RecordingEntry[]>` (`retryTranscription` di `App.svelte`).
+
+In `RecordsList` ogni riga non è più un unico `<button>`: è un `<div>` che contiene un `<button>` (nome + badge, disabilitato quando `locked`, chiama `onSelect`) e un `Button` "Rilancia" separato (nesting di bottoni non è HTML valido). Il bottone "Rilancia" compare su ogni riga, non solo su quelle fallite: il rilancio è pensato anche per un record trascritto "che non convince". Al click chiama `onRetry(entry.folder_path)` e sostituisce `entries` con l'array ritornato.
+
+In `RecordingDetail` un bottone "Rilancia trascrizione" nell'header (stesso stile di "Apri cartella") chiama `onRetry(entry.folder_path)` ignorando il valore di ritorno: l'aggiornamento arriva da `App.svelte` che riassegna `selectedEntry`, prop che si propaga qui da sola. Il corpo mostra `TranscriptView` se `entry.transcript` è presente, altrimenti il messaggio d'errore in rosso se `entry.error` è presente, altrimenti "Trascrizione non ancora disponibile."
 
 ### `Button.svelte`
 
