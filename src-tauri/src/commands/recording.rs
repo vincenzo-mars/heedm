@@ -6,12 +6,33 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 
-use super::stt::TranscriptResult;
-use super::{get_stt_settings, recordings_dir};
+use super::stt::{check_stt_server, TranscriptError, TranscriptResult};
+use super::{get_stt_settings, local_model_path, recordings_dir};
 use crate::recorder::audio::{self, TARGET_SAMPLE_RATE};
 use crate::recorder::{aec, mic, system_audio, RecorderState};
 
 const AUDIO_EXTENSIONS: &[&str] = &["wav", "mp3", "m4a", "mp4", "flac", "ogg", "aac"];
+
+/// Guardia condivisa da `start_recording` e `import_audio_file`: entrambe
+/// finiscono in `transcribe_recording`, quindi entrambe devono rifiutarsi se
+/// il modello non è sul disco o whisper-server non è in esecuzione. Ripete
+/// lato backend il gate già applicato in UI, per il caso in cui il frontend
+/// sia disallineato (es. chiamata programmatica, race sullo stato).
+async fn ensure_stt_ready(app: &AppHandle) -> Result<(), String> {
+    let settings = get_stt_settings(app.clone()).await;
+    if !local_model_path(app, &settings).exists() {
+        return Err(
+            "Modello whisper non scaricato: scaricalo dalle impostazioni prima di continuare"
+                .to_string(),
+        );
+    }
+    if check_stt_server().await != "running" {
+        return Err(
+            "Server whisper non attivo: avvialo dalle impostazioni prima di continuare".to_string(),
+        );
+    }
+    Ok(())
+}
 
 /// Crea la cartella `<recordings_dir>/<timestamp>` per una nuova entry e
 /// ritorna il path del WAV da scriverci. Condivisa da `stop_recording` e
@@ -112,6 +133,8 @@ fn decode_audio(path: &Path) -> Result<(Vec<f32>, u16, u32), String> {
 /// `transcribe_recording`). Ritorna il path del WAV, oppure `None` se annullato.
 #[tauri::command]
 pub async fn import_audio_file(app: AppHandle) -> Result<Option<String>, String> {
+    ensure_stt_ready(&app).await?;
+
     let picker_app = app.clone();
     let picked = tauri::async_runtime::spawn_blocking(move || {
         picker_app
@@ -157,10 +180,19 @@ pub struct RecordingEntry {
     pub folder_path: String,
     pub name: String,
     pub transcript: Option<TranscriptResult>,
+    /// Messaggio dell'ultimo fallimento di trascrizione, letto da
+    /// `transcript_error.json`. Sempre `None` quando `transcript` è presente:
+    /// un rilancio riuscito rimuove il sidecar d'errore (vedi `stt.rs`).
+    pub error: Option<String>,
 }
 
 #[tauri::command]
-pub async fn start_recording(state: State<'_, RecorderState>) -> Result<(), String> {
+pub async fn start_recording(
+    app: AppHandle,
+    state: State<'_, RecorderState>,
+) -> Result<(), String> {
+    ensure_stt_ready(&app).await?;
+
     let mut inner = state.0.lock().await;
     if inner.is_recording {
         return Err("Already recording".to_string());
@@ -290,10 +322,22 @@ pub async fn list_recordings(app: AppHandle) -> Result<Vec<RecordingEntry>, Stri
             .await
             .ok()
             .and_then(|b| serde_json::from_slice(&b).ok());
+        // Il sidecar d'errore non ha motivo di esistere insieme a un transcript
+        // valido (vedi `transcribe_recording`): lo si legge solo in sua assenza.
+        let error = if transcript.is_none() {
+            tokio::fs::read(folder.join("transcript_error.json"))
+                .await
+                .ok()
+                .and_then(|b| serde_json::from_slice::<TranscriptError>(&b).ok())
+                .map(|e| e.message)
+        } else {
+            None
+        };
         result.push(RecordingEntry {
             folder_path: folder.to_string_lossy().into_owned(),
             name,
             transcript,
+            error,
         });
     }
 

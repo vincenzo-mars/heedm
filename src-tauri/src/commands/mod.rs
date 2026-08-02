@@ -72,11 +72,17 @@ pub(crate) fn recordings_dir(app: &AppHandle, settings: &SttSettings) -> PathBuf
 #[tauri::command]
 pub async fn get_stt_settings(app: AppHandle) -> SttSettings {
     let path = settings_path(&app);
-    tokio::fs::read_to_string(&path)
+    let mut settings: SttSettings = tokio::fs::read_to_string(&path)
         .await
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+
+    // local_ready persistito è solo l'ultimo valore noto: la verità è il file
+    // sul disco (l'utente può cancellarlo a mano, un download può essere stato
+    // interrotto). Va sempre riverificato, mai fidarsi del flag salvato.
+    settings.local_ready = local_model_path(&app, &settings).exists();
+    settings
 }
 
 #[tauri::command]
