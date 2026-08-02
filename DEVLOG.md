@@ -195,7 +195,7 @@ Formato:
 **Decisioni:**
 - Offline (post-processing) invece di real-time: più semplice, funziona per il caso d'uso (registrazione poi trascrizione)
 - Skip AEC se correlazione < 0.10: evita di peggiorare registrazioni senza echo
-- `ponytail:` comment nel file — se in futuro serve gestire reverb multi-path, upgrade a `webrtc-audio-processing`
+- Limite noto documentato nel commento in testa ad `aec.rs` — se in futuro serve gestire reverb multi-path, upgrade a `webrtc-audio-processing`
 
 ---
 

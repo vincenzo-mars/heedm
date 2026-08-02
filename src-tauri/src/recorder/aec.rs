@@ -1,4 +1,4 @@
-// ponytail: simplified offline AEC — delay estimation via cross-correlation + least-squares subtraction.
+// Simplified offline AEC — delay estimation via cross-correlation + least-squares subtraction.
 // Covers the dominant echo path (direct acoustic). For multi-path reverb, use webrtc-audio-processing.
 
 use super::audio::rms;
