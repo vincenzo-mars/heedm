@@ -13,6 +13,76 @@ Formato:
 
 ---
 
+## 2026-08-03 — Download del modello LLM con progress bar, Impostazioni full-width
+
+**Obiettivo:** un bottone di download esplicito per il modello LLM (oggi implicito nel bottone "Avvia" del server, senza feedback), con una progress bar reale; allargare il modal Impostazioni, oggi un singolo modal stretto di 420px.
+
+**Fatto (backend, `src-tauri/src/commands/`):**
+- Nuovo `download.rs`: estratto da `stt.rs` lo streaming HTTP generico (`.part` + rename atomico + cleanup su errore), condiviso ora fra `download_local_model` (whisper) e il nuovo `download_llm_model` (LLM)
+- `llm.rs`: nuovo comando `download_llm_model` (scarica il GGUF scelto da `https://huggingface.co/<repo>/resolve/main/<file>`, evento dedicato `llm-download-progress`); `start_llm_server` passa a `--model <path>` invece di `--hf-repo`/`--hf-file`, fallisce subito se il file non esiste; `set_llm_model` accetta anche `size_bytes`; `clear_llm_cache` cancella sia `llm-models/` sia la vecchia `llm-cache/`; `get_hf_model_files` filtra via i GGUF divisi in shard (`-NNNNN-of-NNNNN.gguf`)
+- `mod.rs`: `SttSettings` guadagna `llm_size_bytes`/`llm_ready` (quest'ultimo ricalcolato da disco in `get_stt_settings`, mai persistito come verità, mirror di `local_ready`); nuovi helper `llm_model_path`/`llm_models_dir`
+
+**Fatto (frontend, `src/`):**
+- `types.ts`: `SttSettings.llmSizeBytes`/`llmReady`; nuovo tipo `LlmDownloadProgress` su un evento separato (vedi Decisioni)
+- `SettingsPanel.svelte`: bottone "Scarica modello" nella sezione Modello LLM (mirror di quello whisper, 4 stati, progress bar propria); Avvia/Riavvia del server LLM disabilitati se il modello non è pronto; modal `w-[min(1400px,92vw)]`, corpo a griglia 2 colonne (sinistra: Permessi/Whisper/STT/Cartella; destra: Modello LLM/Server LLM)
+
+**Decisioni:**
+- **Corregge la decisione "Niente download manager custom per il modello LLM" del 2026-08-02**: la barra nativa di `llama-server` (`Downloading <file> ─────╴ NN%`, in `common/download.cpp`) è dietro un check `!is_output_a_tty()` — sotto `Stdio::piped()` (necessario per catturarla da un processo figlio Tauri) non produce alcun output. Non è un problema di formato del log: è output zero. Verificato sia leggendo il sorgente al tag pinnato (`b10229`) sia con un avvio reale del binario bundlato sotto pipe
+- **Scartata anche la modalità "child download" di llama-server** (`LLAMA_SERVER_CHILD_MODE=download`, JSON pulito su stdout senza gate tty): esiste e avrebbe funzionato, ma è un protocollo interno non documentato legato al tag pinnato, a rischio di rompersi silenziosamente a un bump di versione
+- **Scartato anche pre-scaricare noi il file nel layout cache nativo di llama-server**: schema hash-based (`models--org--repo/blobs/<hash>`, stile huggingface_hub), file spesso serviti da HF via redirect a storage "Xet" — hash non derivabile in modo affidabile lato nostro
+- **heedm scarica il GGUF da sé** (stesso pattern di `download_local_model`): percentuale byte-esatta da `content_length()`, `llmReady` derivabile dal disco con lo stesso invariante di whisper, zero parsing fragile. Costo accettato: si perde il resume/etag nativo di llama.cpp, stesso livello di servizio che il download whisper ha già senza lamentele
+- **Evento `llm-download-progress` separato da `download-progress`**, non un nuovo `step` sullo stesso evento: quello ha già due listener indipendenti (`SettingsPanel` e `Onboarding`), e uno step `"done"` condiviso avrebbe fatto scattare per errore, nel listener whisper di `SettingsPanel`, il codice che marca `localReady = true`
+- **GGUF divisi in shard esclusi da questa iterazione**: riguardano solo modelli enormi (40GB+) che nessuna macchina target caricherebbe comunque; supportarli richiederebbe raggruppare gli shard e sommarne le size per una percentuale aggregata, fuori scope
+- **Vecchia cache `llm-cache/` non migrata automaticamente**: chi ha già un modello scaricato con la versione precedente lo perde silenziosamente ai fini di `llmReady` (va ririscaricato), ma il file resta sul disco finché l'utente non preme esplicitamente "Elimina modelli scaricati" — nessuna cancellazione automatica a sorpresa
+
+**Verificato:** `npm run typecheck` (0 errori), `npm run lint:fix` (nessuna modifica), `cargo check --manifest-path src-tauri/Cargo.toml` (pulito). URL di download per un repo reale verificato con `curl -I` (redirect Xet, 302, seguito di default da `reqwest`).
+
+**Non verificato:** download reale di un modello in app (richiede `npm run tauri dev`, non avviato di iniziativa in questa sessione su richiesta esplicita dell'utente); layout a 2 colonne verificato solo leggendo il markup, non con uno screenshot reale; `fresh-install` (obbligatorio per modifiche al download del modello, non eseguito).
+
+**Prossimi passi:** i tre punti non verificati sopra, con l'utente presente o su autorizzazione esplicita (skill `run-heedm`, poi `fresh-install`).
+
+---
+
+## 2026-08-02 — Riassunto e chat locale sulla trascrizione (Vercel AI SDK + llama-server)
+
+**Obiettivo:** per ogni registrazione trascritta, un riassunto/appunti generato automaticamente e una chat per domande di follow-up sulla trascrizione, usando Vercel AI SDK contro un LLM locale (nessun cloud), stessa filosofia di whisper.
+
+**Fatto (backend, `src-tauri/src/commands/`):**
+- Estratto `server.rs`: `port_is_open`/`wait_for_port`/`stop_tracked_server`, condivisi fra `stt.rs` (refactorato, zero cambio di comportamento) e il nuovo `llm.rs`, per non duplicare due invarianti non ovvi (guard mai tenuto attraverso un `.await`, mai kill-by-porta)
+- Nuovo `llm.rs`: ciclo di vita `llama-server` (porta 8081, `LLM_PORT`; `STT_PORT` rinominato da `LOCAL_PORT`), `search_hf_models`/`get_hf_model_files` (proxy Rust verso l'API pubblica di Hugging Face, `reqwest`), `get_system_memory_gb` (`sysinfo`), sidecar `notes.json` (`read_recording_notes`/`write_recording_notes`/`delete_recording_notes`, scrittura atomica)
+- `scripts/build-llama-server.sh`: calco di `build-whisper-server.sh`, clona `ggml-org/llama.cpp` (tag `b10229`), universale arm64+x86_64, `-DLLAMA_BUILD_UI=OFF` (nessuna dipendenza da npm/rete in build), `-DLLAMA_BUILD_LIBRESSL=ON` (vedi Decisioni: senza, `--hf-repo`/`--hf-file` falliscono a runtime)
+- `tauri.conf.json` bundla `binaries/llama-server`; `capabilities/default.json` aggiunge `http:allow-fetch*` scoped a `http://127.0.0.1:8081/*`; `lib.rs` registra `tauri_plugin_http` e uccide anche il child LLM su `ExitRequested`
+
+**Fatto (frontend, `src/`):**
+- `src/lib/llm.ts`: unico file che conosce l'AI SDK. `createOpenAICompatible` con `fetch` di `@tauri-apps/plugin-http` (non la fetch nativa del webview), `buildTranscriptContext`, `streamSummary`/`streamChatReply` (`streamText`), `parseSummary`
+- `TranscriptNotes.svelte` (orchestrazione) + `TranscriptChat.svelte` (presentazionale), montati in `RecordingDetail.svelte` sotto la card trascrizione
+- `App.svelte`: `llmStatus` + `refreshLlmState` mirror di `sttStatus`/`refreshSttState`, con un poll periodico (2s) mentre `"loading"`/`"starting"`
+- `SettingsPanel.svelte`: sezione "Modello LLM" (ricerca live HF con debounce, espansione per repo con dimensione reale + badge RAM, `gated` non selezionabile) e "Server LLM" (Avvia/Riavvia/Spegni/Svuota cache), `serverLoading`/`serverError` split in `sttLoading`/`sttError` + `llmLoading`/`llmError`
+
+**Decisioni:**
+- **Non `@ai-sdk/svelte`**: la sua classe `Chat` richiede un backend HTTP proprio che esegua `streamText()` — heedm non ha un server JS a runtime. Si usano le funzioni core (`streamText`) direttamente nel frontend contro `llama-server`
+- **Niente download manager custom per il modello LLM**: `llama-server --hf-repo/--hf-file` scarica e cacha da solo (env `LLAMA_CACHE`, puntata a una directory gestita da heedm). Ricerca modelli **live** contro l'API di Hugging Face (verificata con chiamate dirette in fase di piano: `search`, `?blobs=true` per le dimensioni reali, `gated`), non fasce statiche né modello fisso
+- **Fetch via `@tauri-apps/plugin-http`, non fetch diretta dal webview, fin dall'inizio**: l'ATS di macOS può bloccare HTTP semplice da un'app pacchettizzata anche verso `127.0.0.1` ([tauri-apps/tauri#4722](https://github.com/tauri-apps/tauri/issues/4722)), e heedm non aveva mai avuto un'eccezione ATS configurata. Scelto come default fin da subito invece che come fallback da scoprire a UI già scritta
+- **`-DLLAMA_BUILD_LIBRESSL=ON` obbligatorio, scoperto solo testando davvero il download**: il primo binario compilato (senza questo flag) compilava senza errori ma falliva a runtime con `"HTTPS is not supported"` su qualunque `--hf-repo`. `llama.cpp` ha droppato `libcurl`, il downloader HF ora linka un backend TLS direttamente (OpenSSL/BoringSSL/LibreSSL); LibreSSL vendorizzata è l'unica delle tre che non richiede una libreria di sistema preinstallata, coerente con lo script esistente. Non era nella documentazione consultata in fase di piano: emerso solo eseguendo per davvero un test di download (repo di test minuscolo `ggml-org/tiny-llamas`, non un modello di produzione)
+- **`/health`, non solo la porta, per il readiness check LLM**: `llama-server` apre la porta prima di aver caricato il modello (503→200), a differenza di whisper-server
+- **`start_llm_server` non attende `/health`**: il primo avvio può scaricare per minuti, bloccare il comando Tauri per quel tempo sarebbe sbagliato; il frontend fa polling
+- **`attemptStart` di default `false` per l'LLM** (contro `true` di STT): al mount si osserva soltanto, mai un caricamento automatico di un modello da 1-5GB
+- **Generazione riassunto automatica solo se il server è già `"running"`**, altrimenti un CTA esplicito: mai un avvio/download a sorpresa, stessa filosofia di `ensure_stt_ready`
+- **whisper-server e llama-server totalmente indipendenti** (porte, processi, stato separati): chi ha poca RAM viene guidato verso un modello più piccolo dal badge RAM, non forzato a spegnere whisper. Nessun blocco di chat/riassunto durante `isRecording`/`isTranscribing`: processi e porte diversi, nessun conflitto reale
+- **Nessuna astrazione di stato condivisa fra i due cicli di vita server**: `refreshLlmState` duplica la forma di `refreshSttState` invece di un helper comune, coerente con la scelta già presa per STT di non introdurre state management per pochi valori
+- **Riassunto a quattro sezioni marcate** (`RIASSUNTO:`/`PUNTI CHIAVE:`/`AZIONI:`/`DOMANDE APERTE:`), testo semplice non JSON/`generateObject`: lo structured output non fa streaming, uno spinner di 20-60s è peggio del testo che appare
+- **Un solo `notes.json`** (non `summary.json`+`chat.json`): un solo scrittore, whole-document replace, niente da riconciliare fra due file
+- **Truncation invece di map-reduce** per trascrizioni lunghe (`--context-shift` disattivato lato server ⇒ prompt troppo lungo è un errore secco): il map-reduce è il fix corretto ma fuori scope, annotato come prossimo passo
+- **Licenza Llama 3.2** (se scelto dall'utente in ricerca): richiede menzione "Built with Llama" in caso di distribuzione dell'app — non bloccante per uso personale, nota per un eventuale About screen futuro
+
+**Verificato:** `cargo check` e `npm run typecheck` puliti. Binario `llama-server` compilato (universale arm64+x86_64), flag CLI (`--hf-repo`, `--hf-file`, `--ctx-size`, `--n-gpu-layers`, `--parallel`, `--alias`, `--jinja` on-by-default, `--no-webui`) confermati con `--help` sul binario reale. **End-to-end reale** sul binario che verrà bundlato: `--hf-repo`/`--hf-file` scarica e cacha da Hugging Face (repo di test minuscolo, non un modello di produzione da GB), `/health` passa da assente a `200`, `/v1/chat/completions` risponde in streaming SSE fino a `[DONE]` — prima con LibreSSL mancante (fallimento riprodotto), poi con la build corretta (successo). `npm run tauri dev` avviato e verificato con screenshot reale: l'app mostra correttamente `Onboarding` su questa macchina di sviluppo (nessun modello whisper scaricato qui), nessuna regressione visibile all'avvio con i nuovi plugin/stato registrati. Bonus non cercato: un `settings.json` preesistente su questa macchina (scritto prima dei campi `llm_hf_repo`/`llm_hf_file`) è stato letto correttamente grazie a `#[serde(default)]`, conferma pratica del rischio di parsing che aveva motivato quella scelta.
+
+**Non verificato:** smoke test STT record→transcribe con un vero modello whisper (nessun modello scaricato su questa macchina di sviluppo, il download da 1.5GB non è stato avviato per questa sola verifica); il flusso end-to-end completo dentro l'app (dettaglio → scelta modello dalla ricerca HF in Settings → riassunto → chat → persistenza dopo riavvio); `fresh-install` sulla build reale installata per il rischio ATS/capability (§3.1) — tutti e tre restano prossimi passi.
+
+**Prossimi passi:** i tre punti non verificati sopra. Map-reduce per trascrizioni molto lunghe, se il cap attuale (~30000 caratteri) risultasse troppo stretto in pratica.
+
+---
+
 ## 2026-07-31 — Ciclo di vita STT: onboarding obbligatorio, gate registrazione, controlli server, rilancio trascrizione
 
 **Obiettivo:** quattro buchi collegati nel ciclo di vita di whisper-server e del modello locale: si poteva premere REC/importare senza server o modello pronti; il primo avvio apriva solo un modal impostazioni invece di un onboarding vero; non c'era modo di fermare/riavviare/eliminare il server o il modello dall'app; un errore di trascrizione non lasciava traccia e non si poteva rilanciare senza una nuova registrazione.
