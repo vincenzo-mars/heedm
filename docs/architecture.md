@@ -133,6 +133,8 @@ Il download scrive su un file temporaneo `<model>.bin.part` nella stessa cartell
 
 ### Ciclo di vita del server
 
+Le primitive di processo/porta (`port_is_open`, `wait_for_port`, `stop_tracked_server`) vivono in `commands/server.rs`, condivise con il server LLM (vedi sotto): la logica di stop porta due invarianti non ovvi (guard rilasciato prima di ogni `.await`, mai kill-by-porta) che una copia-incolla fra due domini avrebbe finito per rompere in uno dei due punti.
+
 `WhisperServerState` tiene l'unico handle al processo. `start_local_server`:
 
 1. Se la porta 8080 è già in ascolto, esce subito
@@ -172,11 +174,63 @@ Con `diarize=true` e un file **stereo**, whisper.cpp confronta l'energia dei due
 
 Verificato empiricamente: due voci distinte su canali separati escono correttamente come `speaker` `"0"` e `"1"`; senza il campo `diarize` il campo `speaker` non compare affatto.
 
+## LLM locale (riassunto e chat)
+
+Per ogni registrazione trascritta, un riassunto/appunti generato una volta e persistito, più una chat di follow-up sulla trascrizione, entrambi tramite un LLM **locale** (nessun cloud): stesso principio di whisper, un secondo binario bundlato invece di una dipendenza esterna (Ollama & co).
+
+### Perché non `@ai-sdk/svelte`
+
+La classe `Chat` del binding Svelte di Vercel AI SDK richiede un backend HTTP proprio che esegua `streamText()` e restituisca il protocollo "UI Message Stream" — non può puntare direttamente a un provider. Heedm non ha un server JS a runtime (frontend Vite/Svelte puro in webview + backend Rust), quindi non c'è dove far girare quel backend. Si usano invece le funzioni **core** di `ai` (`streamText`) direttamente nel frontend (`src/lib/llm.ts`), col provider `@ai-sdk/openai-compatible` puntato su `http://127.0.0.1:8081/v1`, l'endpoint OpenAI-compatible nativo di `llama-server`.
+
+### Fetch via `@tauri-apps/plugin-http`, non fetch nativa del webview
+
+`createOpenAICompatible` riceve un `fetch` custom da `@tauri-apps/plugin-http` invece della fetch nativa del browser. Motivo: l'App Transport Security di macOS può bloccare richieste HTTP semplici da un'app pacchettizzata anche verso `127.0.0.1` ([tauri-apps/tauri#4722](https://github.com/tauri-apps/tauri/issues/4722)), e finora heedm non aveva mai fatto una fetch diretta dal webview verso un server locale (tutto l'HTTP esistente, whisper compreso, passa da Rust via `reqwest`) — nessuna eccezione ATS era mai stata necessaria in `Info.plist`. Il plugin esegue la richiesta lato Rust (nessun caricamento di risorsa nel webview, quindi ATS/CORS non si applicano). Capability scoped a `http://127.0.0.1:8081/*` in `capabilities/default.json`, principio del minimo privilegio.
+
+### Binario e modello: `llama-server` con `--model`, download fatto da heedm
+
+`llama-server` (llama.cpp, stessa org `ggml-org` di whisper.cpp) è compilato da `scripts/build-llama-server.sh`, calco di `build-whisper-server.sh` (binario universale macOS, statico, Metal attivo), con `-DLLAMA_BUILD_UI=OFF`/`-DLLAMA_USE_PREBUILT_UI=OFF` per non bundlare né costruire la web UI (heedm non la usa).
+
+**`-DLLAMA_BUILD_LIBRESSL=ON` è obbligatorio**, non opzionale: senza un backend TLS il binario compila comunque (nessun errore in fase di build) ma fallisce a runtime con `"HTTPS is not supported"` su qualunque richiesta HTTPS — verificato empiricamente in fase di implementazione, non assunto dalla documentazione. `llama.cpp` non usa più `libcurl`: linka OpenSSL/BoringSSL/LibreSSL direttamente. LibreSSL vendorizzata dal build stesso (nessuna libreria di sistema da installare sulla macchina di sviluppo) è l'unica delle tre opzioni coerente col resto dello script: self-contained, nessuna dylib esterna.
+
+A differenza di quanto ci si aspetterebbe, **il modello non viene scaricato da `llama-server`**: pur supportando nativamente `--hf-repo <owner/repo> --hf-file <filename>`, la sua barra di progresso nativa (`Downloading <file> ─────╴ NN%`) è emessa da `common/download.cpp` dietro un check `!is_output_a_tty()` — sotto `Stdio::piped()` (necessario per catturare l'output da un processo Tauri) non produce assolutamente nulla, quindi non è osservabile per costruire una progress bar (vedi `DEVLOG.md`). Duplicare il layout della cache nativa di llama-server per pre-scaricare il file altrove è stato scartato a sua volta: usa uno schema hash-based (`models--org--repo/blobs/<hash>`, stile huggingface_hub) con file serviti spesso via redirect a storage "Xet", non banalmente riproducibile lato nostro.
+
+`download_llm_model` (`commands/llm.rs`, via l'helper condiviso `commands/download.rs`) scarica quindi il GGUF da sé via `reqwest`, stesso identico pattern di `download_local_model` per whisper: stream diretto da `https://huggingface.co/<repo>/resolve/main/<file>`, scrittura su `.part`, evento di progresso (`llm-download-progress`) per ogni chunk, rename atomico a fine stream. Il file finisce in `<model_dir>/llm-models/<org>--<repo>/<file>.gguf` (slash sanitizzato in `--`, nessun hash: percorso ispezionabile a mano). `start_llm_server` passa quel percorso a `llama-server` con `--model <path>`, non più `--hf-repo`/`--hf-file`, e fallisce subito se il file non esiste ancora sul disco. Il repo/file/size scelti dall'utente sono persistiti in `SttSettings.llm_hf_repo`/`llm_hf_file`/`llm_size_bytes`; `llm_ready` è ricalcolato da `get_stt_settings` verificando l'esistenza del file, esattamente come `local_ready` per whisper — mai la fonte di verità è il valore persistito.
+
+Chi ha scaricato un modello con una versione precedente di heedm (quella con `--hf-repo`/`--hf-file`) ha la vecchia cache in `<model_dir>/llm-cache/` (layout hash-based sopra): non viene migrata automaticamente, resta finché l'utente preme "Elimina modelli scaricati" in Settings (`clear_llm_cache`, cancella entrambe le cartelle).
+
+### Ricerca modelli: proxy Rust verso l'API di Hugging Face
+
+`search_hf_models`/`get_hf_model_files` (`commands/llm.rs`) interrogano `huggingface.co/api/models` via `reqwest` (lato Rust, non fetch diretta dal webview, per coerenza con l'unico altro precedente HTTP del progetto). `search_hf_models` filtra a `filter=gguf&pipeline_tag=text-generation`; `get_hf_model_files` chiama il dettaglio repo con `?blobs=true` (l'unico modo per ottenere `siblings[].size` reale) e segnala `gated` così la UI può disabilitare la selezione per i repo che richiederebbero autenticazione HF (non supportata). `get_system_memory_gb` (crate `sysinfo`) alimenta un badge euristico "consigliato per la tua RAM" sui file di dimensione diversa, mai bloccante.
+
+### Ciclo di vita: `/health`, non solo la porta
+
+A differenza di whisper-server, `llama-server` apre la porta **prima** di aver caricato il modello: `/health` risponde `503` mentre carica, `200` quando è pronto. `check_llm_server` sonda `/health` (non solo `port_is_open`) per distinguere `"loading"` da `"running"`. `start_llm_server` spawna e ritorna subito, **senza** attendere `/health` come fa whisper con la sua attesa-porta-con-timeout: il modello è già sul disco (il download è un passo separato, vedi sopra), ma caricare qualche GB in RAM/VRAM può comunque richiedere parecchi secondi, e bloccare il comando Tauri per quel tempo sarebbe sbagliato. Il frontend (`App.svelte`, `refreshLlmState`) fa polling periodico di `check_llm_server` finché lo stato non è `"running"`.
+
+`whisper-server` e `llama-server` sono processi indipendenti (porte 8080/8081, `WhisperServerState`/`LlamaServerState` separati): avviare/fermare l'uno non tocca l'altro. Chi ha poca RAM viene guidato verso un modello LLM più piccolo dal badge RAM in ricerca, non forzato a spegnere whisper.
+
+`refreshLlmState` in `App.svelte` inverte il default di `attemptStart` rispetto a `refreshSttState` (`false` invece di `true`): al mount si osserva soltanto, non si carica un modello da 1-5GB per una feature che molte sessioni non toccano mai. Il download/avvio è sempre un'azione esplicita dell'utente (Settings o CTA nel pannello note), mai automatico — stessa filosofia di `ensure_stt_ready`, che non avvia mai whisper al posto dell'utente.
+
+### Note per registrazione: `notes.json`
+
+Un solo sidecar accanto al WAV (`read_recording_notes`/`write_recording_notes`/`delete_recording_notes`, scrittura atomica via `.part` + rename come il download del modello whisper), con `summary` (quattro sezioni: testo, punti chiave, azioni, domande aperte) e `messages` (cronologia chat completa). Whole-document replace: un solo scrittore (il componente `TranscriptNotes.svelte`), niente da riconciliare fra due file separati.
+
+Il riassunto è generato con un prompt a sezioni marcate (`RIASSUNTO:`/`PUNTI CHIAVE:`/`AZIONI:`/`DOMANDE APERTE:`, testo semplice non JSON: lo structured output non fa streaming), parsate da `parseSummary` in `llm.ts`. Se il modello non rispetta il formato (possibile coi modelli non curati, scelti dalla ricerca libera), il testo grezzo finisce tutto in `text` senza mai bloccare con un errore.
+
+Il contesto della trascrizione (`buildTranscriptContext`) usa `groupSegments` già esistente per righe `[m:ss] IO: ...`/`[m:ss] INTERLOCUTORE: ...` quando la diarizzazione è disponibile, altrimenti il testo grezzo (mono/import). Va nelle `instructions` (system prompt), non in un primo messaggio: tenere il prefisso del prompt identico turno dopo turno lascia a llama.cpp la possibilità di riusare la KV cache dello slot invece di riprocessare l'intera trascrizione a ogni domanda. Cap a `MAX_TRANSCRIPT_CHARS` (~30000): `--context-shift` è disattivato lato server, quindi un prompt troppo lungo è un errore secco, non un troncamento morbido.
+
+Generazione automatica del riassunto solo se `llmStatus === "running"` all'apertura del dettaglio; altrimenti un CTA esplicito, mai un avvio/download a sorpresa.
+
+### Onboarding: nessun gate
+
+Il download/scelta del modello LLM è opzionale e lazy: `Onboarding.svelte` resta invariato e riguarda solo whisper (nulla funziona senza), la chat è puramente additiva su un'app che già registra e trascrive.
+
 ## Stato persistente
 
-- `settings.json` — `SttSettings` serializzato in `app_data_dir/` (`local_ready` è solo l'ultimo valore noto, vedi sopra)
-- `app_data_dir/models/ggml-large-v3-turbo.bin` — il modello; `ggml-large-v3-turbo.bin.part` può comparire durante un download, sempre transitorio
-- `~/Documents/Heedm/Records/<timestamp>/` — `recording.wav` + `transcript.json` (successo) oppure `transcript_error.json` (ultimo tentativo fallito, rimosso al primo rilancio riuscito)
+- `settings.json` — `SttSettings` serializzato in `app_data_dir/` (`local_ready`/`llm_ready` sono solo l'ultimo valore noto, vedi sopra; `llm_hf_repo`/`llm_hf_file`/`llm_size_bytes` sono il modello LLM scelto, tutti `#[serde(default)]` per non far fallire il parsing di un `settings.json` scritto prima che questi campi esistessero)
+- `app_data_dir/models/ggml-large-v3-turbo.bin` — il modello whisper; `ggml-large-v3-turbo.bin.part` può comparire durante un download, sempre transitorio
+- `app_data_dir/models/llm-models/<org>--<repo>/<file>.gguf` — i modelli LLM scaricati da heedm stesso (`download_llm_model`); `.gguf.part` durante un download, sempre transitorio
+- `app_data_dir/models/llm-cache/` — vecchia cache nativa di `llama-server` (`LLAMA_CACHE`, layout hash-based), non più scritta ma non migrata automaticamente: resta finché l'utente non preme "Elimina modelli scaricati"
+- `~/Documents/Heedm/Records/<timestamp>/` — `recording.wav` + `transcript.json` (successo) oppure `transcript_error.json` (ultimo tentativo fallito, rimosso al primo rilancio riuscito) + `notes.json` (riassunto/chat, opzionale)
 
 ## Dipendenze chiave
 
@@ -187,5 +241,9 @@ Verificato empiricamente: due voci distinte su canali separati escono correttame
 | screencapturekit | 7.x | System audio macOS |
 | hound | 3.x | Encoding WAV |
 | symphonia | 0.5 | Decodifica dei file importati, Rust puro, niente ffmpeg |
-| reqwest | 0.12 | HTTP verso whisper-server e Hugging Face |
+| reqwest | 0.12 | HTTP verso whisper-server, Hugging Face (modello whisper e ricerca modelli LLM) |
 | tokio | 1.x | Runtime async |
+| sysinfo | 0.33 | RAM totale, per il badge "consigliato" nella ricerca modelli LLM |
+| tauri-plugin-http | 2.x | Fetch lato Rust per le chiamate AI SDK verso `llama-server` (evita ATS/CORS nel webview) |
+
+Frontend: `ai` (core, `streamText`) + `@ai-sdk/openai-compatible` per il provider locale, `@tauri-apps/plugin-http` per il fetch, tutti in `src/lib/llm.ts`. Deliberatamente **non** `@ai-sdk/svelte` (vedi sopra).

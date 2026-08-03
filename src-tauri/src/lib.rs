@@ -2,6 +2,7 @@ mod commands;
 mod permissions;
 mod recorder;
 
+use commands::llm::LlamaServerState;
 use commands::stt::WhisperServerState;
 use recorder::RecorderState;
 use tauri::Manager;
@@ -11,8 +12,10 @@ pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_http::init())
         .manage(RecorderState::new())
         .manage(WhisperServerState::new())
+        .manage(LlamaServerState::new())
         .invoke_handler(tauri::generate_handler![
             commands::recording::start_recording,
             commands::recording::stop_recording,
@@ -26,6 +29,19 @@ pub fn run() {
             commands::stt::restart_stt_server,
             commands::stt::download_local_model,
             commands::stt::delete_local_model,
+            commands::llm::get_system_memory_gb,
+            commands::llm::search_hf_models,
+            commands::llm::get_hf_model_files,
+            commands::llm::set_llm_model,
+            commands::llm::download_llm_model,
+            commands::llm::check_llm_server,
+            commands::llm::start_llm_server,
+            commands::llm::stop_llm_server,
+            commands::llm::restart_llm_server,
+            commands::llm::clear_llm_cache,
+            commands::llm::read_recording_notes,
+            commands::llm::write_recording_notes,
+            commands::llm::delete_recording_notes,
             commands::get_stt_settings,
             commands::save_stt_settings,
             commands::get_local_model_path,
@@ -38,13 +54,23 @@ pub fn run() {
 
     app.run(|app_handle, event| {
         if let tauri::RunEvent::ExitRequested { .. } = event {
-            let child = app_handle
+            let whisper_child = app_handle
                 .state::<WhisperServerState>()
                 .0
                 .lock()
                 .ok()
                 .and_then(|mut guard| guard.take());
-            if let Some(mut child) = child {
+            if let Some(mut child) = whisper_child {
+                let _ = child.start_kill();
+            }
+
+            let llm_child = app_handle
+                .state::<LlamaServerState>()
+                .0
+                .lock()
+                .ok()
+                .and_then(|mut guard| guard.take());
+            if let Some(mut child) = llm_child {
                 let _ = child.start_kill();
             }
         }
