@@ -12,6 +12,7 @@ import {
   formatElapsed,
   type RecordingEntry,
   type RecordingStatus,
+  type ServerStatus,
   type SttSettings,
   type SttStatus,
 } from "./lib/types";
@@ -23,6 +24,7 @@ let isTranscribing = $state(false);
 let transcribeMs = $state(0);
 let sttStatus = $state<SttStatus>("checking");
 let modelReady = $state(false);
+let llmStatus = $state<ServerStatus>("checking");
 let showSettings = $state(false);
 let view = $state<"record" | "list" | "detail">("record");
 let selectedEntry = $state<RecordingEntry | null>(null);
@@ -41,6 +43,7 @@ let recordGateReason = $derived.by(() => {
 
 $effect(() => {
   refreshSttState();
+  refreshLlmState();
 });
 
 // Punto unico di riallineamento fra stato reale (whisper-server + modello sul
@@ -82,6 +85,60 @@ async function refreshSttState(
     return null;
   }
 }
+
+// Mirror di refreshSttState per il server LLM (riassunto/chat), con un
+// default invertito: `attemptStart` è `false` qui (STT ce l'ha `true`).
+// Al mount osserviamo soltanto: non ha senso caricare 1-5GB di modello per
+// una feature che molte sessioni non toccano mai. Diventa `true` solo
+// quando l'utente preme esplicitamente "Avvia" (Settings o pannello note).
+async function refreshLlmState(
+  opts: { attemptStart?: boolean } = {},
+): Promise<SttSettings | null> {
+  const attemptStart = opts.attemptStart ?? false;
+  llmStatus = "checking";
+  try {
+    const settings = await invoke<SttSettings>("get_stt_settings");
+    const status = await invoke<string>("check_llm_server");
+    if (status === "running") {
+      llmStatus = "running";
+      return settings;
+    }
+    if (status === "loading") {
+      llmStatus = "loading";
+      return settings;
+    }
+    if (!attemptStart) {
+      llmStatus = "stopped";
+      return settings;
+    }
+    llmStatus = "starting";
+    await invoke("start_llm_server");
+    llmStatus = "loading";
+    return settings;
+  } catch {
+    llmStatus = "error";
+    return null;
+  }
+}
+
+// llama-server, a differenza di whisper-server, può restare "loading" a
+// lungo (download del modello al primo avvio): questo poll periodico è
+// l'unico modo per la UI di accorgersi quando diventa "running" da solo,
+// senza un secondo click dell'utente.
+$effect(() => {
+  if (llmStatus !== "loading" && llmStatus !== "starting") return;
+  const id = setInterval(async () => {
+    try {
+      const status = await invoke<string>("check_llm_server");
+      if (status === "running") llmStatus = "running";
+      else if (status === "stopped") llmStatus = "stopped";
+      else llmStatus = "loading";
+    } catch {
+      llmStatus = "error";
+    }
+  }, 2000);
+  return () => clearInterval(id);
+});
 
 $effect(() => {
   if (!isTranscribing) return;
@@ -279,6 +336,8 @@ async function retryTranscription(
         {isRecording}
         {isTranscribing}
         onRetry={retryTranscription}
+        {llmStatus}
+        onLlmRefresh={refreshLlmState}
       />
     </main>
   {/if}
@@ -293,6 +352,8 @@ async function retryTranscription(
       {isTranscribing}
       {sttStatus}
       onServerRefresh={refreshSttState}
+      {llmStatus}
+      onLlmServerRefresh={refreshLlmState}
     />
   {/if}
 </div>

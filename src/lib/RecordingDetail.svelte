@@ -1,8 +1,9 @@
 <script lang="ts">
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import Button from "./Button.svelte";
+import TranscriptNotes from "./TranscriptNotes.svelte";
 import TranscriptView from "./TranscriptView.svelte";
-import type { RecordingEntry } from "./types";
+import type { RecordingEntry, ServerStatus, SttSettings } from "./types";
 
 let {
   entry,
@@ -10,12 +11,18 @@ let {
   isRecording,
   isTranscribing,
   onRetry,
+  llmStatus,
+  onLlmRefresh,
 }: {
   entry: RecordingEntry;
   onBack: () => void;
   isRecording: boolean;
   isTranscribing: boolean;
   onRetry: (folderPath: string) => Promise<RecordingEntry[]>;
+  llmStatus: ServerStatus;
+  onLlmRefresh: (opts?: {
+    attemptStart?: boolean;
+  }) => Promise<SttSettings | null>;
 } = $props();
 
 // Stesso lock globale di RecordsList: mentre gira una registrazione o una
@@ -62,4 +69,6 @@ async function handleRetry() {
       </p>
     {/if}
   </div>
+
+  <TranscriptNotes {entry} {llmStatus} {onLlmRefresh} />
 </div>

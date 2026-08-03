@@ -10,10 +10,23 @@ export interface SttSettings {
   configured: boolean;
   modelDir: string | null;
   recordingsDir: string | null;
+  llmHfRepo: string;
+  llmHfFile: string;
+  llmSizeBytes: number;
+  llmReady: boolean;
 }
 
 export interface DownloadProgress {
   step: "model" | "done";
+  pct: number;
+}
+
+// Evento separato da DownloadProgress: quello ha già due listener
+// indipendenti (SettingsPanel e Onboarding), e lo step "done" condiviso
+// farebbe scattare per errore il codice "modello whisper pronto" su un
+// download dell'LLM.
+export interface LlmDownloadProgress {
+  step: "llm" | "done";
   pct: number;
 }
 
@@ -41,12 +54,64 @@ export interface RecordingEntry {
   error: string | null;
 }
 
-export type SttStatus =
+// Stato di un server locale gestito dall'app (whisper o llm). "loading" è
+// specifico dell'LLM: llama-server apre la porta prima di aver caricato il
+// modello, whisper-server no, quindi whisper non lo usa mai.
+export type ServerStatus =
   | "checking"
   | "starting"
   | "running"
   | "error"
-  | "stopped";
+  | "stopped"
+  | "loading";
+
+export type SttStatus = ServerStatus;
+
+// ── Note per registrazione (riassunto + chat locale) ───────────────────────────
+
+export interface NotesSummary {
+  text: string;
+  key_points: string[];
+  actions: string[];
+  open_questions: string[];
+  model: string;
+  generated_at: string;
+}
+
+export type ChatRole = "user" | "assistant";
+
+export interface ChatMessage {
+  id: string;
+  role: ChatRole;
+  content: string;
+  at: string;
+}
+
+export interface RecordingNotes {
+  version: number;
+  summary: NotesSummary | null;
+  messages: ChatMessage[];
+}
+
+// ── Ricerca modelli Hugging Face ────────────────────────────────────────────────
+
+export interface HfModelSummary {
+  id: string;
+  downloads: number;
+  likes: number;
+  license: string | null;
+}
+
+export interface HfGgufFile {
+  filename: string;
+  size_bytes: number;
+}
+
+export interface HfModelDetail {
+  gated: boolean;
+  context_length: number | null;
+  files: HfGgufFile[];
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

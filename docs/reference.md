@@ -16,7 +16,7 @@ Registrati in `lib.rs` con il percorso completo del modulo: la macro `generate_h
 | `get_local_model_path` | — | `String` | Path assoluto del modello; crea la cartella padre così "Mostra nel Finder" funziona anche prima del download |
 | `get_recordings_dir` | — | `String` | Path assoluto della cartella registrazioni, creata se assente |
 
-Gli helper di percorso (`model_dir`, `local_model_path`, `recordings_dir`, `bundled_bin_path`) prendono un `&SttSettings` già caricato, per non rileggere `settings.json` a ogni chiamata.
+Gli helper di percorso (`model_dir`, `local_model_path`, `recordings_dir`, `bundled_bin_path`, `llm_model_path`, `llm_models_dir`, `llm_cache_dir`) prendono un `&SttSettings` già caricato, per non rileggere `settings.json` a ogni chiamata. `llm_model_path` ritorna `None` se non è stato scelto un modello; `llm_cache_dir` resta solo per pulire la vecchia cache nativa di llama-server (vedi `clear_llm_cache` sotto).
 
 ### STT (`commands/stt.rs`)
 
@@ -29,6 +29,24 @@ Gli helper di percorso (`model_dir`, `local_model_path`, `recordings_dir`, `bund
 | `delete_local_model` | — | `Result<(), String>` | Ferma il server (il processo tiene il `.bin` aperto), poi cancella il file del modello. Errore se lo stop fallisce |
 | `check_stt_server` | — | `String` | `"running"` oppure `"stopped"` |
 | `transcribe_recording` | `path: String` | `Result<TranscriptResult, String>` | POST a `/inference`, scrive `transcript.json` accanto al WAV; su errore scrive `transcript_error.json` (sidecar `{ message }`), su successo lo rimuove se presente. Riusata anche per il rilancio: nessuna firma dedicata |
+
+### LLM locale (`commands/llm.rs`)
+
+| Command | Input | Output | Effetti |
+|---|---|---|---|
+| `get_system_memory_gb` | — | `f64` | RAM totale in GB, per il badge "consigliato" nella ricerca modelli |
+| `search_hf_models` | `query: String` | `Vec<HfModelSummary>` | Proxy verso l'API di ricerca Hugging Face (`filter=gguf&pipeline_tag=text-generation`) |
+| `get_hf_model_files` | `repoId: String` | `HfModelDetail` | Proxy verso il dettaglio repo (`?blobs=true`, unico modo per avere `size` reale); filtra ai soli file `.gguf` |
+| `set_llm_model` | `repo: String, file: String, sizeBytes: u64` | `Result<(), String>` | Persiste `llm_hf_repo`/`llm_hf_file`/`llm_size_bytes` in `settings.json`; non avvia/riavvia/scarica da solo |
+| `download_llm_model` | — | `Result<(), String>` | Scarica il GGUF scelto direttamente da Hugging Face (stesso pattern di `download_local_model`, `commands/download.rs`), emette `llm-download-progress`. Non usa il downloader nativo di llama-server (`--hf-repo`/`--hf-file`): la sua barra di progresso è gated su `isatty(stdout)` nel sorgente di llama.cpp e non produce output sotto `Stdio::piped()` (vedi `DEVLOG.md`) |
+| `check_llm_server` | — | `String` | `"stopped"` (porta chiusa) / `"loading"` (porta aperta, `/health` non ancora 200) / `"running"` (`/health` 200) |
+| `start_llm_server` | — | `Result<(), String>` | Errore se il modello non è ancora scaricato (`llm_model_path` non esiste su disco); spawna `llama-server` con `--model <path locale>`; ritorna subito senza attendere `/health` (il caricamento in RAM/VRAM può richiedere parecchi secondi) |
+| `stop_llm_server` | — | `Result<(), String>` | Come `stop_stt_server`, ma sul processo/porta LLM (`commands/server.rs`, condiviso) |
+| `restart_llm_server` | — | `Result<(), String>` | `stop_llm_server` + `start_llm_server` |
+| `clear_llm_cache` | — | `Result<(), String>` | Ferma il server, poi cancella sia `llm-models/` (i modelli scaricati da heedm) sia la vecchia `llm-cache/` (cache nativa di llama-server, chi aveva già scaricato un modello con una versione precedente dell'app) |
+| `read_recording_notes` | `folderPath: String` | `RecordingNotes` | File mancante/non parsabile → documento vuoto, mai un errore |
+| `write_recording_notes` | `folderPath: String, notes: RecordingNotes` | `Result<(), String>` | Whole-document replace, scrittura atomica (`.part` + rename) |
+| `delete_recording_notes` | `folderPath: String` | `Result<(), String>` | `NotFound` trattato come successo |
 
 ### Registrazione (`commands/recording.rs`)
 
@@ -56,12 +74,23 @@ Per il microfono non c'è un check di stato: l'unica API è `AVCaptureDevice.aut
 | Evento | Payload | Emesso da |
 |---|---|---|
 | `download-progress` | `{ step: "model" \| "done", pct: number }` | `download_local_model` |
+| `llm-download-progress` | `{ step: "llm" \| "done", pct: number }` | `download_llm_model` |
+
+Evento separato dal precedente invece di un nuovo `step` su `download-progress`: quell'evento ha già due listener indipendenti (`SettingsPanel` e `Onboarding`), e uno `step: "done"` condiviso farebbe scattare per errore, nel listener whisper di `SettingsPanel`, il codice che marca `localReady = true`.
 
 ## Tipi condivisi (`src/lib/types.ts`)
 
-`SttSettings`, `RecordingStatus`, `RecordingEntry`, `TranscriptResult`, `TranscriptSegment`, `DownloadProgress`, `SttStatus`, `TranscriptStatus`.
+`SttSettings`, `RecordingStatus`, `RecordingEntry`, `TranscriptResult`, `TranscriptSegment`, `DownloadProgress`, `LlmDownloadProgress`, `ServerStatus`, `SttStatus`, `TranscriptStatus`, `NotesSummary`, `ChatRole`, `ChatMessage`, `RecordingNotes`, `HfModelSummary`, `HfGgufFile`, `HfModelDetail`.
 
-`SttStatus` = `"checking" | "starting" | "running" | "error" | "stopped"`. `"stopped"` è distinto da `"error"`: è l'esito di uno stop esplicito (impostazioni), non di un fallimento.
+`ServerStatus` = `"checking" | "starting" | "running" | "error" | "stopped" | "loading"`, stato di un server locale gestito dall'app (whisper o LLM). `"stopped"` è distinto da `"error"`: è l'esito di uno stop esplicito (impostazioni), non di un fallimento. `"loading"` è specifico dell'LLM (`llama-server` apre la porta prima di aver caricato il modello; whisper-server no, quindi non lo usa mai). `SttStatus` è un alias di `ServerStatus` per non far churnare `SttIndicator`/`SettingsPanel`.
+
+`LlmDownloadProgress { step: "llm" | "done", pct: number }`: stessa forma di `DownloadProgress`, ma su un evento dedicato (vedi sopra).
+
+`SttSettings.llmHfRepo`/`llmHfFile: string` (`""` = nessun modello scelto) sono il modello LLM selezionato dall'utente in Settings. `llmSizeBytes: number` è la size del file scelto (nota dal frontend al momento della selezione, da `HfGgufFile.size_bytes`), usata solo per etichettare il bottone di download. `llmReady: boolean` rispecchia `localReady`: ricalcolato da `get_stt_settings` verificando `llm_model_path` sul disco, mai la fonte di verità è il valore persistito.
+
+`NotesSummary { text, key_points: string[], actions: string[], open_questions: string[], model, generated_at }`, `ChatMessage { id, role: ChatRole, content, at }` (`ChatRole` = `"user" | "assistant"`), `RecordingNotes { version, summary: NotesSummary | null, messages: ChatMessage[] }`: rispecchiano 1:1 le struct Rust in `commands/llm.rs` (snake_case, come `RecordingEntry`/`TranscriptResult`, non camelCase come `SttSettings`).
+
+`HfModelSummary { id, downloads, likes, license }` (risultato di ricerca), `HfGgufFile { filename, size_bytes }`, `HfModelDetail { gated, context_length, files: HfGgufFile[] }` (dettaglio repo).
 
 `RecordingEntry.error: string | null` è il messaggio dell'ultimo fallimento di trascrizione (da `transcript_error.json`), sempre `null` quando `transcript` è presente.
 
@@ -85,7 +114,9 @@ Svelte 5 con le rune (`$state`, `$derived`, `$effect`, `$props`), un componente 
 
 ### `App.svelte` (root)
 
-Stato: `isRecording`, `durationMs`, `error`, `isTranscribing`, `transcribeMs`, `sttStatus`, `modelReady`, `showSettings`, `view` (`"record" | "list" | "detail"`), `selectedEntry`.
+Stato: `isRecording`, `durationMs`, `error`, `isTranscribing`, `transcribeMs`, `sttStatus`, `modelReady`, `llmStatus`, `showSettings`, `view` (`"record" | "list" | "detail"`), `selectedEntry`.
+
+`refreshLlmState(opts?: { attemptStart?: boolean }): Promise<SttSettings | null>` è il mirror di `refreshSttState` per il server LLM: stessa forma, stessa fonte di verità (`get_stt_settings` + `check_llm_server`), ma **default invertito** — `attemptStart` è `false` qui contro il `true` di STT. Al mount si osserva soltanto: caricare un modello LLM da 1-5GB per una feature che molte sessioni non toccano mai non ha senso, a differenza di whisper che serve sempre. Un secondo `$effect` fa polling di `check_llm_server` ogni 2s finché `llmStatus` è `"loading"`/`"starting"`, perché a differenza di whisper il tempo di avvio (download compreso) è imprevedibile e nessun secondo click dell'utente lo farebbe altrimenti aggiornare. Passata a `SettingsPanel` (`onLlmServerRefresh`) e a `RecordingDetail`→`TranscriptNotes` (`onLlmRefresh`).
 
 `canRecord = $derived(sttStatus === "running" && modelReady)` è il gate lato UI per registrazione e import (rispecchia `ensure_stt_ready` lato backend, vedi [`architecture.md`](architecture.md)); `recordGateReason` (`$derived.by`) è il messaggio in italiano da mostrare quando `!canRecord`, che distingue "modello non scaricato" da "server non attivo". Quando `!canRecord`: il bottone REC resta abilitato per lo STOP (non blocca una registrazione già in corso) ma non per l'avvio, il bottone "o carica un file" è disabilitato, entrambi mostrano `recordGateReason` come `title`, e lo stesso testo appare come paragrafo visibile sotto i bottoni. `handleRecord`/`handleImport` ripetono il controllo su `canRecord` anche a runtime (non solo sull'attributo `disabled`), per coerenza con la guardia backend.
 
@@ -115,8 +146,9 @@ Due elementi flottanti in basso: il pulsante impostazioni a destra e la pillola 
 | `running` | verde | "Server attivo" |
 | `error` | rosso | "Server non disponibile" |
 | `stopped` | grigio fisso | "Server fermo" |
+| `loading` | ambra lampeggiante | "Caricamento..." |
 
-Il colore semantico vive solo sul dot: il testo resta `brand-cream` per uniformità.
+Il colore semantico vive solo sul dot: il testo resta `brand-cream` per uniformità. `loading` esiste solo perché `SttStatus` è ora un alias di `ServerStatus`: whisper-server non lo usa mai (apre la porta solo a modello già caricato), questo componente mostra solo lo stato STT, non quello LLM (nessuna pill separata per l'LLM, vedi `architecture.md`).
 
 ### `Onboarding.svelte`
 
@@ -126,7 +158,7 @@ Prop: `onContinue: () => void`, chiamata dal bottone "Continua"; `App.svelte` la
 
 ### `SettingsPanel.svelte`
 
-Modal con permessi OS, download del modello, controllo server STT e percorsi. Contenitore `max-h-[85vh]` con il corpo scrollabile: header e bottone Salva restano fissi. La sezione permessi viene per prima perché blocca tutto il resto.
+Modal con permessi OS, download dei modelli, controllo server STT/LLM e percorsi. Contenitore `w-[min(1400px,92vw)] max-h-[88vh]` con il corpo a griglia scrollabile (`grid-cols-1 lg:grid-cols-2`, un solo scroll esterno): header e bottone Salva restano fissi fuori dalla griglia. Colonna sinistra (core, sempre rilevante): Permessi, Modello Whisper, Server STT, Cartella registrazioni. Colonna destra (opzionale, additiva): Modello LLM, Server LLM — stessa distinzione già in [`architecture.md`](architecture.md) fra STT (sempre necessario) e LLM (riassunto/chat, lazy). Sotto il breakpoint `lg` (1024px) le due colonne si impilano in una sola, identico al layout precedente. La sezione permessi viene per prima perché blocca tutto il resto.
 
 Prop:
 - `onClose: () => void` — callback per chiudere il modal
@@ -135,6 +167,8 @@ Prop:
 - `isTranscribing?: boolean` — disabilita i bottoni del server se in corso una trascrizione
 - `sttStatus: SttStatus` — stato del server, passato da `App.svelte` (fonte di verità unica, non duplicato localmente)
 - `onServerRefresh: (opts?: { attemptStart?: boolean }) => Promise<SttSettings | null>` — `refreshSttState` di `App.svelte`, passata by reference: ogni azione sul server la richiama per riallineare lo stato condiviso (gate REC, `SttIndicator`) invece di tenere una copia locale che si disallineerebbe alla chiusura del modal con la X
+- `llmStatus: ServerStatus` — stato del server LLM, passato da `App.svelte`
+- `onLlmServerRefresh: (opts?: { attemptStart?: boolean }) => Promise<SttSettings | null>` — `refreshLlmState` di `App.svelte`, stesso ruolo di `onServerRefresh` ma per l'LLM
 
 Sezione server STT: mostra lo stato attuale (`"Attivo"` se `sttStatus === "running"`, `"Fermo"` altrimenti) e quattro bottoni:
 - **Avvia**: chiama `start_stt_server`, poi `onServerRefresh()`
@@ -142,7 +176,22 @@ Sezione server STT: mostra lo stato attuale (`"Attivo"` se `sttStatus === "runni
 - **Spegni**: chiama `stop_stt_server`, poi `onServerRefresh({ attemptStart: false })` (NON riavvia automaticamente)
 - **Elimina modello**: chiama `delete_local_model`, poi `onServerRefresh()` (aggiorna `modelReady` a `false`, che fa ricomparire `Onboarding` in `App.svelte`) e infine `onSaved`/`onClose` per chiudere il modal
 
-Tutti i bottoni rimangono `disabled` durante `serverLoading`, registrazione o trascrizione. Se un comando fallisce, l'errore è mostrato in rosso nella card di stato.
+Tutti i bottoni rimangono `disabled` durante `sttLoading`, registrazione o trascrizione. Se un comando fallisce, l'errore è mostrato in rosso nella card di stato.
+
+Sezione "Modello LLM": campo di ricerca con debounce (~400ms, query di default "instruct" a campo vuoto così il pannello non è mai vuoto al primo ingresso) → `search_hf_models` → lista repo (nome, licenza dai tag, download) → click espande e chiama `get_hf_model_files` (i file GGUF divisi in shard, `<nome>-NNNNN-of-NNNNN.gguf`, sono filtrati via lato Rust: fuori scope, vedi `DEVLOG.md`) → lista file `.gguf` con dimensione reale e un badge "consigliato/pesante per la tua RAM" (euristica su `get_system_memory_gb`, mai bloccante) → click su un file chiama `set_llm_model` (con la size) e aggiorna `settings` in locale (`llmReady` torna `false` finché il download non completa). Repo `gated` mostrato ma non selezionabile (lucchetto + messaggio, nessun flusso di login HF).
+
+Subito sotto il box "Selezionato" c'è il bottone di download (mirror di quello whisper: stessa progress bar, stesso stile), con 4 stati:
+
+| Condizione | Label |
+|---|---|
+| nessun modello selezionato | bottone non renderizzato |
+| download in corso | "Download in corso..." (disabled) |
+| selezionato, non ancora scaricato | "Scarica modello (X GB)" |
+| già scaricato (`llmReady`) | "Scarica di nuovo (X GB)" |
+
+Il download (`download_llm_model`) ascolta l'evento dedicato `llm-download-progress`; a `step: "done"` ricarica `settings` da `get_stt_settings` (non setta `llmReady` in ottimismo: la verità è il file su disco) e richiama `onLlmServerRefresh`.
+
+Sezione "Server LLM" sotto: stessa forma di "Server STT" ma con `llmStatus`/i comandi `*_llm_server`; Avvia/Riavvia sono `disabled` anche quando `!settings.llmReady` (con un messaggio "Scarica prima il modello" nella card di stato), più un bottone "Elimina modelli scaricati" (`clear_llm_cache`, cancella sia i modelli scaricati da heedm sia la vecchia cache nativa di llama-server). `sttLoading`/`sttError` e `llmLoading`/`llmError` sono stati locali separati per sezione: un errore sul server LLM non disabilita i controlli whisper e viceversa.
 
 ### `RecordsList.svelte`, `RecordingDetail.svelte`, `TranscriptView.svelte`
 
@@ -152,7 +201,15 @@ Prop condivise da `RecordsList` e `RecordingDetail`: `isRecording: boolean`, `is
 
 In `RecordsList` ogni riga non è più un unico `<button>`: è un `<div>` che contiene un `<button>` (nome + badge, disabilitato quando `locked`, chiama `onSelect`) e un `Button` "Rilancia" separato (nesting di bottoni non è HTML valido). Il bottone "Rilancia" compare su ogni riga, non solo su quelle fallite: il rilancio è pensato anche per un record trascritto "che non convince". Al click chiama `onRetry(entry.folder_path)` e sostituisce `entries` con l'array ritornato.
 
-In `RecordingDetail` un bottone "Rilancia trascrizione" nell'header (stesso stile di "Apri cartella") chiama `onRetry(entry.folder_path)` ignorando il valore di ritorno: l'aggiornamento arriva da `App.svelte` che riassegna `selectedEntry`, prop che si propaga qui da sola. Il corpo mostra `TranscriptView` se `entry.transcript` è presente, altrimenti il messaggio d'errore in rosso se `entry.error` è presente, altrimenti "Trascrizione non ancora disponibile."
+In `RecordingDetail` un bottone "Rilancia trascrizione" nell'header (stesso stile di "Apri cartella") chiama `onRetry(entry.folder_path)` ignorando il valore di ritorno: l'aggiornamento arriva da `App.svelte` che riassegna `selectedEntry`, prop che si propaga qui da sola. Il corpo mostra `TranscriptView` se `entry.transcript` è presente, altrimenti il messaggio d'errore in rosso se `entry.error` è presente, altrimenti "Trascrizione non ancora disponibile." Sotto la card trascrizione, `<TranscriptNotes {entry} {llmStatus} {onLlmRefresh} />` (prop aggiuntive di `RecordingDetail`, passate da `App.svelte`).
+
+### `TranscriptNotes.svelte`, `TranscriptChat.svelte`, `src/lib/llm.ts`
+
+Riassunto e chat locale sulla trascrizione di una registrazione (vedi `architecture.md` per il flusso completo). `TranscriptNotes` è l'orchestrazione: carica `read_recording_notes` al mount, genera il riassunto in streaming (`streamSummary` da `llm.ts`) automaticamente se `llmStatus === "running"` e non esiste ancora, altrimenti mostra un CTA in base allo stato (nessun modello scelto/server fermo/server in caricamento); espone il bottone "Rigenera" quando un riassunto esiste già. Persiste su disco (`write_recording_notes`) una volta per riassunto completato e una volta per turno di chat completato, mai per token. Un `AbortController` per richiesta è abortito sia da un bottone "Interrompi" sia dal teardown dell'`$effect` (uscire dal dettaglio a metà streaming non deve lasciare occupato lo slot del server locale).
+
+Un errore in chat non persiste il messaggio utente: resta in `pendingQuestion`, passato a `TranscriptChat` come `retryDraft` così l'utente può reinviare senza riscrivere la domanda. `TranscriptChat` è puramente presentazionale: lista messaggi, bolla di streaming, textarea con invio su Enter (Shift+Enter per andare a capo), disabilitata quando `disabled` (LLM non `"running"`) o `busy`.
+
+`llm.ts` è l'unico file che conosce l'AI SDK: `createOpenAICompatible` col `fetch` di `@tauri-apps/plugin-http` (vedi `architecture.md`), `buildTranscriptContext` (righe `[m:ss] IO/INTERLOCUTORE` o testo grezzo, con cap e flag `truncated`), `streamSummary`/`streamChatReply` (wrapper di `streamText`), `parseSummary` (parser tollerante delle quattro sezioni marcate).
 
 ### `Button.svelte`
 
