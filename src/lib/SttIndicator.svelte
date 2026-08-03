@@ -38,6 +38,14 @@ const STATUS: Record<SttStatus, { label: string; text: string; dot: string }> =
       text: "text-brand-cream",
       dot: "bg-gray-400",
     },
+    // whisper-server non passa mai da questo stato (a differenza di
+    // llama-server, apre la porta solo a modello già caricato): presente
+    // solo perché SttStatus è un alias di ServerStatus.
+    loading: {
+      label: "Caricamento...",
+      text: "text-brand-cream/50",
+      dot: "bg-amber-500 animate-[blink_0.8s_ease-in-out_infinite]",
+    },
   };
 </script>
 

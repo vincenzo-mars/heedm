@@ -9,6 +9,7 @@
 - Frontend: Svelte (src/)
 - Target: macOS (arm64 + x64), con supporto futuro Linux e Windows
 - STT: solo locale tramite whisper-server (whisper.cpp), porta 8080
+- Riassunto/chat sulle trascrizioni: LLM locale tramite llama-server (llama.cpp), porta 8081, via Vercel AI SDK (core, non `@ai-sdk/svelte`)
 - Nessun Docker, nessuna dipendenza cloud
 
 ## Architettura — mappa moduli
@@ -19,7 +20,10 @@ src-tauri/src/
   lib.rs                         # setup app, registra tutti i commands
   commands/
     mod.rs                       # settings, percorsi, permessi OS
+    server.rs                    # primitive condivise processo/porta (stt.rs + llm.rs)
+    download.rs                  # streaming HTTP condiviso (stt.rs + llm.rs) per il download dei modelli
     stt.rs                       # download modello, ciclo di vita whisper-server, trascrizione
+    llm.rs                       # ricerca modelli HF, download modello, ciclo di vita llama-server, note (riassunto/chat)
     recording.rs                 # start/stop/status/list registrazione, import file
   permissions.rs                 # permessi OS (Screen Recording via CoreGraphics, pannelli System Settings)
   recorder/
@@ -40,12 +44,15 @@ src/
   lib/
     types.ts                     # tipi e helper condivisi
     utils.ts                     # cn() (clsx + tailwind-merge)
+    llm.ts                       # provider AI SDK, prompt, streaming (unico file che conosce l'AI SDK)
     Button.svelte                # bottone dell'app (varianti ghost/icon)
     SttIndicator.svelte          # indicatore stato server STT
-    SettingsPanel.svelte         # modal impostazioni/download modello
+    SettingsPanel.svelte         # modal impostazioni/download modello/server STT+LLM
     RecordsList.svelte           # lista registrazioni
     RecordingDetail.svelte       # dettaglio singola registrazione
     TranscriptView.svelte        # rendering trascrizione con speaker
+    TranscriptNotes.svelte       # riassunto + chat locale sulla trascrizione (orchestrazione)
+    TranscriptChat.svelte        # chat locale: UI presentazionale (log, streaming, input)
 
 docs/
   architecture.md                # backend: flusso dati, pipeline audio, integrazione whisper
@@ -54,7 +61,7 @@ docs/
 
 ## Comandi
 
-- Dev: `source ~/.cargo/env && npm run tauri dev` — richiede `src-tauri/binaries/whisper-server` (se manca: `bash scripts/build-whisper-server.sh`)
+- Dev: `source ~/.cargo/env && npm run tauri dev` — richiede `src-tauri/binaries/whisper-server` (se manca: `bash scripts/build-whisper-server.sh`) e `src-tauri/binaries/llama-server` (se manca: `bash scripts/build-llama-server.sh`)
 - Lint/format: `npm run lint:fix` (biome)
 - Typecheck FE: `npm run typecheck`
 - Test Rust: `source ~/.cargo/env && cargo test --manifest-path src-tauri/Cargo.toml` — oggi non linka su questo setup (vedi Gotchas macOS): la verifica reale è `cargo check`
@@ -72,6 +79,7 @@ Estende le regole globali (skill `/commit`), non le ripete. Specifico di heedm:
 
 - Una feature che tocca recording/STT non è finita finché lo smoke test record→transcribe non passa (skill `run-heedm`)
 - Una modifica a onboarding, permessi OS o download del modello va verificata da stato vergine (skill `fresh-install`): i permessi concessi in `tauri dev` appartengono a un'identità diversa da quella dell'app installata, quindi in dev quel flusso non lo vedi
+- Stesso motivo per qualsiasi fetch diretta dal webview verso un server locale (es. AI SDK → llama-server via `@tauri-apps/plugin-http`): l'App Transport Security di macOS può comportarsi diversamente in un'app firmata/notarizzata installata rispetto a `tauri dev` — verificare con `fresh-install`, non assumere che funzioni perché va in dev
 - Modifiche UI: verifica con screenshot reale (skill `run-heedm`), non dichiarare "fatto" senza aver visto il render
 
 ## Gotchas macOS
