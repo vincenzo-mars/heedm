@@ -7,11 +7,16 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
 use super::download::download_to_file;
-use super::server::{default_threads, port_is_open, spawn_tracked, stop_tracked_server};
+use super::server::{
+    default_threads, port_is_open, spawn_tracked, stop_tracked_server, try_adopt_running_server,
+};
 use super::{
     bundled_bin_path, get_stt_settings, llm_cache_dir, llm_model_path, llm_models_dir,
-    save_stt_settings, LLM_PORT,
+    save_stt_settings, server_lock_path, LLM_PORT,
 };
+
+/// Nome del lockfile del processo llama-server (vedi `server_lock_path`).
+pub(crate) const LLM_LOCK: &str = "llm";
 
 // ── Ciclo di vita del server ───────────────────────────────────────────────────
 
@@ -93,10 +98,6 @@ pub async fn check_llm_server() -> String {
 
 #[tauri::command]
 pub async fn start_llm_server(app: AppHandle) -> Result<(), String> {
-    if port_is_open(LLM_PORT).await {
-        return Ok(());
-    }
-
     let settings = get_stt_settings(app.clone()).await;
     let model_path = llm_model_path(&app, &settings)
         .filter(|p| p.exists())
@@ -104,6 +105,11 @@ pub async fn start_llm_server(app: AppHandle) -> Result<(), String> {
     let model_path = model_path
         .to_str()
         .ok_or("Percorso del modello non rappresentabile come UTF-8")?;
+
+    let lock_path = server_lock_path(&app, LLM_LOCK);
+    if try_adopt_running_server(LLM_PORT, &lock_path, model_path).await? {
+        return Ok(());
+    }
 
     let bin = bundled_bin_path(&app, "llama-server")?;
 
@@ -129,6 +135,8 @@ pub async fn start_llm_server(app: AppHandle) -> Result<(), String> {
             "--no-webui",
         ],
         &app.state::<LlamaServerState>().0,
+        &lock_path,
+        model_path,
     )?;
 
     // Niente attesa di `/health` qui: il modello è già sul disco (vedi guard
@@ -165,12 +173,22 @@ pub async fn download_llm_model(app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn stop_llm_server(app: AppHandle) -> Result<(), String> {
-    stop_tracked_server(&app.state::<LlamaServerState>().0, LLM_PORT).await
+    stop_tracked_server(
+        &app.state::<LlamaServerState>().0,
+        LLM_PORT,
+        &server_lock_path(&app, LLM_LOCK),
+    )
+    .await
 }
 
 #[tauri::command]
 pub async fn restart_llm_server(app: AppHandle) -> Result<(), String> {
-    stop_tracked_server(&app.state::<LlamaServerState>().0, LLM_PORT).await?;
+    stop_tracked_server(
+        &app.state::<LlamaServerState>().0,
+        LLM_PORT,
+        &server_lock_path(&app, LLM_LOCK),
+    )
+    .await?;
     start_llm_server(app).await
 }
 
@@ -197,7 +215,12 @@ pub async fn set_llm_model(
 pub async fn clear_llm_cache(app: AppHandle) -> Result<(), String> {
     // Il processo tiene i file di modello aperti (mmap): va fermato prima di
     // cancellare, stesso motivo di `delete_local_model` per whisper.
-    stop_tracked_server(&app.state::<LlamaServerState>().0, LLM_PORT).await?;
+    stop_tracked_server(
+        &app.state::<LlamaServerState>().0,
+        LLM_PORT,
+        &server_lock_path(&app, LLM_LOCK),
+    )
+    .await?;
 
     let settings = get_stt_settings(app.clone()).await;
 

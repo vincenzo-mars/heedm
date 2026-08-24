@@ -7,9 +7,16 @@ use tauri::{AppHandle, Manager};
 
 use super::download::download_to_file;
 use super::server::{
-    default_threads, port_is_open, spawn_tracked, stop_tracked_server, wait_for_port,
+    default_threads, port_is_open, spawn_tracked, stop_tracked_server, try_adopt_running_server,
+    wait_for_port,
 };
-use super::{bundled_bin_path, get_stt_settings, local_model_path, save_stt_settings, STT_PORT};
+use super::{
+    bundled_bin_path, get_stt_settings, local_model_path, save_stt_settings, server_lock_path,
+    STT_PORT,
+};
+
+/// Nome del lockfile del processo whisper-server (vedi `server_lock_path`).
+pub(crate) const STT_LOCK: &str = "whisper";
 
 const MODEL_URL: &str =
     "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin";
@@ -42,10 +49,6 @@ impl WhisperServerState {
 }
 
 async fn start_local_server(app: AppHandle) -> Result<(), String> {
-    if port_is_open(STT_PORT).await {
-        return Ok(());
-    }
-
     let settings = get_stt_settings(app.clone()).await;
     let bin = bundled_bin_path(&app, "whisper-server")?;
     let model = local_model_path(&app, &settings);
@@ -56,6 +59,11 @@ async fn start_local_server(app: AppHandle) -> Result<(), String> {
     let model = model
         .to_str()
         .ok_or("Percorso del modello non rappresentabile come UTF-8")?;
+
+    let lock_path = server_lock_path(&app, STT_LOCK);
+    if try_adopt_running_server(STT_PORT, &lock_path, model).await? {
+        return Ok(());
+    }
 
     // Flash attention e numero di thread non hanno UI: si deducono dalla
     // macchina. `-fa` esiste solo dalle build recenti di whisper.cpp (vedi
@@ -74,6 +82,8 @@ async fn start_local_server(app: AppHandle) -> Result<(), String> {
             "--flash-attn",
         ],
         &app.state::<WhisperServerState>().0,
+        &lock_path,
+        model,
     )?;
 
     wait_for_port(STT_PORT, 60).await
@@ -94,7 +104,12 @@ pub async fn start_stt_server(app: AppHandle) -> Result<(), String> {
 }
 
 async fn stop_local_server(app: &AppHandle) -> Result<(), String> {
-    stop_tracked_server(&app.state::<WhisperServerState>().0, STT_PORT).await
+    stop_tracked_server(
+        &app.state::<WhisperServerState>().0,
+        STT_PORT,
+        &server_lock_path(app, STT_LOCK),
+    )
+    .await
 }
 
 #[tauri::command]

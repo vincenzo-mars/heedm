@@ -13,6 +13,33 @@ Formato:
 
 ---
 
+## 2026-08-24 — Lockfile con pid: chiudere il ciclo degli orfani
+
+**Obiettivo:** un server sopravvissuto a una morte violenta dell'app (SIGKILL sul padre, Force Quit, logout) tiene la porta e non è distinguibile da un processo di terzi. L'app lo adottava alla cieca e poi rifiutava di fermarlo ("chiudilo manualmente"), lasciando l'utente fuori dai propri controlli. Il caso non si previene (nessun codice del padre gira): si rimedia alla sessione dopo.
+
+**Fatto:**
+- `commands/mod.rs`: `server_lock_path` → `<app_data_dir>/run/<nome>.json`
+- `commands/server.rs`: `ServerLock { pid, bin, started_at, model }` scritto da `spawn_tracked`; `read_valid_lock` che valida via `ps -p <pid> -o lstart=,comm=`; `kill_pid` (extern `kill(2)` a mano); `try_adopt_running_server` come punto di decisione dell'avvio; `stop_tracked_server` e `kill_tracked` ora lock-aware
+- `stt.rs` / `llm.rs`: il ramo `if port_is_open { return Ok(()) }` in testa allo start è sostituito da `try_adopt_running_server`
+
+**Decisioni:**
+- **Adozione invece di kill-e-rispawn**: riusare l'orfano evita di ricaricare il modello (~15s per whisper, di più per un GGUF grosso). Costo: lo slot `Child` resta vuoto per sempre, quindi ogni percorso di terminazione deve saper agire per pid
+- **Verifica d'identità su due criteri, binario e istante di avvio**: il pid da solo non basta, l'OS li ricicla e un lock vecchio può puntare a un processo innocente. Se uno dei due non torna, il lock è spazzatura: si cancella e non parte nessun segnale
+- **`model` nel lock**: un `llama-server` orfano può avere in RAM un GGUF diverso da quello ora selezionato. Senza questo campo l'utente parlerebbe col modello vecchio credendolo nuovo, e i riassunti finirebbero in `notes.json` col nome sbagliato. Alternativa scartata: chiedere a `/v1/models`, che vale solo per l'LLM (whisper non espone nulla di equivalente)
+- **Lo start resta permissivo** quando non c'è un lock valido: usa comunque il processo sulla porta, come ha sempre fatto. Rifiutare sarebbe stata una regressione per chi avvia un server a mano per debug (skill `run-heedm`). Il lock aggiunge capacità, non divieti
+- **`kill(2)` dichiarato a mano**, come `sysctlbyname` e `CGPreflightScreenCaptureAccess`: `libc` resta una dipendenza solo transitiva
+- **Limiti accettati e documentati**: `lstart` dipende dal locale (un cambio fa fallire il confronto → l'app non adotta, degrada verso la prudenza); due istanze in parallelo condividono il lock
+
+**Verificato (a runtime, con sonde temporanee poi rimosse):**
+- Adozione: crash simulato con `kill -9` sull'app → orfano + lock → riavvio → stesso pid riusato, nessun rispawn
+- Chiusura: l'orfano adottato (che l'app non ha come `Child`) viene terminato via lockfile, lock cancellato, porta libera. È il ramo senza il quale il ciclo si autoalimenterebbe
+- Sicurezza: lock costruito ad arte su un processo innocente vivo, con `started_at` **corretto** e binario diverso → nessun segnale, processo intatto, lock cancellato come stale. Anche il processo estraneo che occupava la porta è rimasto intatto
+- Modello diverso: lock valido con `model` alterato → vecchio pid terminato, nuovo server avviato, lock riscritto
+
+**Prossimi passi:** verifica del flusso LLM a runtime (serve un GGUF sul disco: il meccanismo è lo stesso, ma il ramo `model` non è stato esercitato su `llama-server`) e `fresh-install` sull'app installata, dove `app_data_dir` è quello reale e non quello di dev.
+
+---
+
 ## 2026-08-24 — Server orfani: due buchi nel cleanup dei processi figli
 
 **Obiettivo:** indagare un `whisper-server` sopravvissuto alla chiusura dell'app, e chiudere i percorsi che possono lasciare un figlio vivo ma non più tracciato.
