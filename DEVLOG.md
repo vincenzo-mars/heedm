@@ -13,6 +13,23 @@ Formato:
 
 ---
 
+## 2026-08-24 — Design system dal rosso al grigio scuro
+
+**Obiettivo:** togliere il rosso come colore di brand e portare l'interfaccia su una scala di grigi scuri neutri, con i bottoni di conferma bianchi.
+
+**Fatto:**
+- `App.css`: i 7 token `--color-brand-*` ridefiniti su grigio neutro (`#1b1b1d` fondo, `#121213` superfici, `#3a3a3d` medio, `#4a4a4e`, `#8e8e93` chiaro, `#f5f5f7` testo, `#0a0a0b` ink); nuovo `--color-brand-cream-dim` (`#e5e5e7`) per l'hover dei bottoni bianchi
+- Nuovi token `--color-rec` / `--color-rec-strong` con i due rossi di prima (`#ab2b29`, `#d23434`): li usano solo il bottone REC, il suo alone (`@keyframes pulse-rec`, ora via `color-mix` sul token invece di `rgb()` letterale) e il timer di registrazione
+- `Button.svelte`: `solid` da fondo rosso a fondo `brand-cream` con testo `brand-ink`, hover `brand-cream-dim`, disabled `brand-lighter` + testo attenuato; `primary` allineato sullo stesso hover
+- Barra di download (`DownloadProgressBar`) e bolla dei messaggi utente (`TranscriptChat`) fuori dal rosso: riempimento `brand-cream`, bolla `brand-light` con testo `brand-ink`
+
+**Decisioni:**
+- Il rosso resta ma cambia ruolo: da colore di brand a segnale di stato della sola registrazione. Da qui i token `rec`/`rec-strong` separati invece di riusare `brand-lighter`/`brand-lightest`, che erano rossi solo per coincidenza di palette
+- `danger` resta rosso pieno: convenzione universale per l'azione distruttiva, e non convive mai con il REC nella stessa schermata (REC in home, Elimina nel dettaglio)
+- Stati semantici server (verde/ambra/rosso) e `SPEAKER_COLORS` invariati, coerentemente con la scelta originale di tenerli fuori dal design system
+- `brand-cream` mantiene il nome benché ora sia un bianco neutro: rinominarlo tocca 100+ occorrenze e sarebbe un refactor a parte
+- `brand-lightest` resta definito ma non ha più utilizzi nel markup (era il rosso del REC)
+
 ## 2026-08-24 — Slimming pass: dead code, dedup, ottimizzazioni runtime
 
 **Obiettivo:** ridurre il codice senza togliere feature: tagliare il codice morto verificato, deduplicare i pattern ripetuti, sistemare le inefficienze runtime a basso rischio.

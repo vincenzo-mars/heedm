@@ -212,13 +212,15 @@ Un errore in chat non persiste il messaggio utente: resta in `pendingQuestion`, 
 
 Il bottone dell'app: cinque varianti (`ghost`, `icon`, `solid`, `danger`, `primary`) come stringhe di utility Tailwind composte con `cn()` (le classi passate via `class` vincono sui conflitti grazie a tailwind-merge, es. per padding/size diversi a parità di variante). Non c'è nessuna libreria di primitivi UI.
 
+`solid` e `primary` sono i due bottoni di conferma: entrambi bianchi (`brand-cream`) con testo scuro e hover `brand-cream-dim`, distinti solo dalla taglia (`primary` è il CTA grande dell'onboarding). `danger` resta rosso pieno: il rosso distruttivo è convenzione, non palette di brand.
+
 ### `ServerControls.svelte`
 
 Blocco stato + controlli di un server locale, usato due volte da `SettingsPanel` (STT e LLM). Prop: `title`, `status: ServerStatus`, `error: string | null`, `hint?: string | null` (mostrato nella card solo in assenza di errore), `loading`, `locked` (registrazione/trascrizione in corso), `canStart?: boolean` (gate extra su Avvia/Riavvia, default `true`), `dangerLabel` e le callback `onStart`/`onRestart`/`onStop`/`onDanger`. Stato mostrato: "Attivo" (`running`) / "Caricamento..." (`loading`) / "Fermo" (tutto il resto).
 
 ### `DownloadProgressBar.svelte`
 
-Barra di avanzamento download modello, usata da `Onboarding` e da `SettingsPanel` (whisper + LLM). Prop: `progress: { step: string; pct: number }` (`step === "done"` → "Completato", altrimenti "Modello N%") e `trackClass?` per il colore della traccia (default `bg-brand-dark`; `Onboarding` passa `bg-brand-darker` perché sta su fondo `brand-dark`).
+Barra di avanzamento download modello, usata da `Onboarding` e da `SettingsPanel` (whisper + LLM). Prop: `progress: { step: string; pct: number }` (`step === "done"` → "Completato", altrimenti "Modello N%") e `trackClass?` per il colore della traccia (default `bg-brand-dark`; `Onboarding` passa `bg-brand-darker` perché sta su fondo `brand-dark`). Il riempimento è `brand-cream`.
 
 ## Styling
 
@@ -228,13 +230,21 @@ Palette in `@theme`, namespace `brand-*` per non collidere con i token base di T
 
 | Token | Hex | Uso |
 |---|---|---|
-| `brand-dark` | `#290808` | sfondo app |
-| `brand-darker` | `#120404` | superfici, card, pannelli |
-| `brand-light` | `#c4807f` | accenti tenui |
-| `brand-lighter` | `#ab2b29` | REC a riposo, bottone download |
-| `brand-lightest` | `#d23434` | REC in registrazione, timer, glow |
-| `brand-cream` | `#fdf6f6` | testo su fondo scuro |
-| `brand-ink` | `#020000` | testo su superfici chiare |
+| `brand-dark` | `#1b1b1d` | sfondo app |
+| `brand-darker` | `#121213` | superfici, card, pannelli |
+| `brand-light` | `#8e8e93` | grigio chiaro: testo secondario, bolla utente in chat |
+| `brand-lighter` | `#3a3a3d` | grigio medio: superficie rialzata, bottone di conferma disabilitato |
+| `brand-lightest` | `#4a4a4e` | gradino grigio più chiaro |
+| `brand-cream` | `#f5f5f7` | testo su fondo scuro, bottoni di conferma |
+| `brand-cream-dim` | `#e5e5e7` | hover dei bottoni di conferma |
+| `brand-ink` | `#0a0a0b` | testo su superfici chiare |
+
+Il rosso non è più colore di brand: vive in due token separati, usati solo dalla registrazione (bottone REC, alone pulsante, timer).
+
+| Token | Hex | Uso |
+|---|---|---|
+| `rec` | `#ab2b29` | REC a riposo |
+| `rec-strong` | `#d23434` | REC in registrazione, timer, glow (`@keyframes pulse-rec`) |
 
 Tema unico dark fisso: niente variante `dark:`, niente token semantici. Le opacità frazionarie (`/10`, `/40`, `/85`) sostituiscono una scala di grigi separata.
 
