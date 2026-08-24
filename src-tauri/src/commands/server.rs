@@ -36,6 +36,12 @@ pub(crate) fn default_threads() -> usize {
 
 /// Spawn di un server locale + registrazione del child nello slot tracciato,
 /// così `stop_tracked_server` e il cleanup alla chiusura possono terminarlo.
+///
+/// `kill_on_drop(true)` è la rete di sicurezza per i percorsi in cui il `Child`
+/// viene droppato senza un kill esplicito (unwind da panic, o un errore a metà
+/// di `stop_tracked_server`): senza, il processo resterebbe vivo tenendo la
+/// porta occupata e non tracciato da nessuno. Non copre la morte violenta
+/// dell'app (SIGKILL sul padre): lì nessun codice del padre gira più.
 pub(crate) fn spawn_tracked(
     bin: &Path,
     args: &[&str],
@@ -43,6 +49,7 @@ pub(crate) fn spawn_tracked(
 ) -> Result<(), String> {
     let child = tokio::process::Command::new(bin)
         .args(args)
+        .kill_on_drop(true)
         .spawn()
         .map_err(|e| e.to_string())?;
     match slot.lock() {
@@ -83,7 +90,17 @@ pub(crate) async fn stop_tracked_server(
 
     match child {
         Some(mut child) => {
-            child.start_kill().map_err(|e| e.to_string())?;
+            // `take()` sopra ha già tolto il child dallo slot: se il segnale non
+            // parte, il processo è ancora vivo e va rimesso dov'era, altrimenti
+            // resterebbe senza nessuno che lo traccia (e `kill_tracked` alla
+            // chiusura dell'app troverebbe lo slot vuoto). Un `wait` fallito
+            // invece non si recupera: lì il SIGKILL è già partito.
+            if let Err(e) = child.start_kill() {
+                if let Ok(mut guard) = slot.lock() {
+                    *guard = Some(child);
+                }
+                return Err(e.to_string());
+            }
             child.wait().await.map_err(|e| e.to_string())?;
         }
         None => {
