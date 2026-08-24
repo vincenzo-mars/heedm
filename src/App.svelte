@@ -1,7 +1,5 @@
 <script lang="ts">
-import { List } from "@lucide/svelte";
-import Router, { push } from "svelte-spa-router";
-import Button from "./lib/Button.svelte";
+import Router from "svelte-spa-router";
 import Onboarding from "./lib/Onboarding.svelte";
 import { routes } from "./lib/routes";
 import SttIndicator from "./lib/SttIndicator.svelte";
@@ -16,19 +14,11 @@ $effect(() => {
 {#if !servers.modelReady}
   <Onboarding onContinue={() => servers.refreshStt()} />
 {:else}
-<div
-  class="flex h-screen flex-col items-center gap-8 overflow-y-auto px-6 pt-6 pb-18 box-border"
->
-  <Button
-    variant="icon"
-    class="fixed right-4 top-4 z-10"
-    onclick={() => push("/list")}
-    title="Registrazioni"
-    aria-label="Vai alle registrazioni"
-  >
-    <List size={16} />
-  </Button>
-
+<!-- Nessun padding e nessun centraggio qui: ogni rotta decide la propria
+     larghezza, e le pagine interne arrivano fino al bordo della finestra.
+     `overflow-hidden` tiene lo scroll dentro la rotta, così l'header di
+     pagina può restare sticky in cima. -->
+<div class="flex h-screen flex-col overflow-hidden">
   <Router {routes} />
 
   <SttIndicator status={servers.sttStatus} />

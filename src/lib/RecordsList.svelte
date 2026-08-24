@@ -1,6 +1,7 @@
 <script lang="ts">
 import { push } from "svelte-spa-router";
 import Button from "./Button.svelte";
+import PageHeader from "./PageHeader.svelte";
 import { recordings } from "./stores/recordings.svelte";
 import { session } from "./stores/session.svelte";
 import {
@@ -19,16 +20,10 @@ async function handleRetry(entry: RecordingEntry) {
 }
 </script>
 
-<div class="flex w-full max-w-170 flex-col gap-4">
-  <div class="flex items-center gap-3">
-    <Button onclick={() => push("/")} aria-label="Torna indietro">← Indietro</Button>
-    <h2
-      class="m-0 text-xs font-semibold tracking-wider text-brand-cream/50 uppercase"
-    >
-      Registrazioni
-    </h2>
-  </div>
+<div class="flex h-full w-full flex-col">
+  <PageHeader title="Registrazioni" onBack={() => push("/")} />
 
+  <div class="flex flex-1 flex-col gap-3 overflow-y-auto px-6 pt-5 pb-18">
   {#if recordings.loading && recordings.all.length === 0}
     <p class="text-sm text-brand-cream/50">Caricamento...</p>
   {:else if recordings.all.length === 0}
@@ -68,4 +63,5 @@ async function handleRetry(entry: RecordingEntry) {
       </div>
     {/each}
   {/if}
+  </div>
 </div>

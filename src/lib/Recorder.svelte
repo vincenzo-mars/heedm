@@ -1,5 +1,7 @@
 <script lang="ts">
+import { List } from "@lucide/svelte";
 import { push } from "svelte-spa-router";
+import Button from "./Button.svelte";
 import { session } from "./stores/session.svelte";
 import { formatDuration, formatElapsed } from "./types";
 
@@ -13,8 +15,21 @@ async function handleRecord() {
 }
 </script>
 
+<!-- L'accesso alla lista vive qui e non nel guscio: le pagine interne hanno
+     già il loro header, e un bottone flottante in alto a destra si
+     sovrapporrebbe alle loro azioni. -->
+<Button
+  variant="icon"
+  class="fixed right-4 top-4 z-10"
+  onclick={() => push("/list")}
+  title="Registrazioni"
+  aria-label="Vai alle registrazioni"
+>
+  <List size={16} />
+</Button>
+
 <main
-  class="flex flex-1 flex-col items-center justify-center gap-6 text-center"
+  class="flex flex-1 flex-col items-center justify-center gap-6 px-6 pb-18 text-center"
 >
   <button
     class={`h-30 w-30 cursor-pointer rounded-full border-none text-base font-bold text-brand-cream transition-[background,box-shadow,transform] duration-200 active:scale-[0.96] disabled:cursor-default disabled:opacity-50 ${

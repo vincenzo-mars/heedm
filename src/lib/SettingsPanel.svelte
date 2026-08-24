@@ -1,11 +1,12 @@
 <script lang="ts">
-import { Folder, Mic, MonitorCheck, MonitorX, X } from "@lucide/svelte";
+import { Folder, Mic, MonitorCheck, MonitorX } from "@lucide/svelte";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { pop } from "svelte-spa-router";
 import Button from "./Button.svelte";
 import DownloadProgressBar from "./DownloadProgressBar.svelte";
+import PageHeader from "./PageHeader.svelte";
 import ServerControls from "./ServerControls.svelte";
 import { servers } from "./stores/servers.svelte";
 import { session } from "./stores/session.svelte";
@@ -275,19 +276,20 @@ async function startDownload() {
   </div>
 {/snippet}
 
-{#if settings}
-  <div class="flex w-full max-w-170 flex-col gap-5 text-brand-cream">
-      <div class="flex items-center justify-between">
-        <span class="text-base font-bold">Impostazioni</span>
-        <button
-          class="text-base leading-none text-brand-cream opacity-40 transition-opacity hover:opacity-100 cursor-pointer"
-          onclick={close}
-          aria-label="Chiudi le impostazioni"><X size={20} /></button
-        >
-      </div>
+{#snippet actions()}
+  <Button variant="primary" class="px-4 py-1.5" onclick={save}>Salva</Button>
+{/snippet}
 
+<div class="flex h-full w-full flex-col">
+  <PageHeader title="Impostazioni" onBack={close} actions={settings ? actions : undefined} />
+
+  <div class="flex-1 overflow-y-auto px-6 pt-5 pb-18 text-brand-cream">
+    {#if settings}
+      <!-- Le due colonne (core e LLM) si allargano con la finestra fino a un
+           tetto: oltre, si stirerebbero lasciando una voragine in mezzo. Una
+           terza colonna non c'è, i gruppi sono due. -->
       <div
-        class="grid min-h-0 grid-cols-1 gap-x-8 gap-y-5 pr-1 lg:grid-cols-2 lg:items-start"
+        class="mx-auto grid w-full max-w-400 grid-cols-1 gap-x-8 gap-y-5 md:grid-cols-2 md:items-start"
       >
       <div class="flex flex-col gap-5">
         <div class="flex flex-col gap-3">
@@ -544,7 +546,6 @@ async function startDownload() {
         />
       </div>
       </div>
-
-      <Button variant="primary" class="p-2.5" onclick={save}>Salva</Button>
+    {/if}
   </div>
-{/if}
+</div>

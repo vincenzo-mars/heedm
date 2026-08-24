@@ -2,6 +2,7 @@
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { push, replace } from "svelte-spa-router";
 import Button from "./Button.svelte";
+import PageHeader from "./PageHeader.svelte";
 import { recordings } from "./stores/recordings.svelte";
 import { servers } from "./stores/servers.svelte";
 import { session } from "./stores/session.svelte";
@@ -35,49 +36,54 @@ async function handleRetry() {
 }
 </script>
 
-<div class="flex w-full max-w-170 flex-col gap-4">
-  {#if !entry}
-    <p class="text-sm text-brand-cream/50">
-      {resolving ? "Caricamento..." : "Registrazione non trovata."}
-    </p>
-  {:else}
-    <div class="flex items-center gap-3">
-      <Button onclick={() => push("/list")} aria-label="Torna alla lista">← Lista</Button>
-      <h2
-        class="m-0 text-xs font-semibold tracking-wider text-brand-cream/50 uppercase"
-      >
-        {entry.name}
-      </h2>
-      <Button
-        class="ml-auto"
-        onclick={handleRetry}
-        disabled={session.locked}
-        title={session.locked ? "Attendi la fine della registrazione o della trascrizione in corso" : undefined}
-      >
-        Rilancia trascrizione
-      </Button>
-      <Button onclick={() => entry && revealItemInDir(entry.folder_path)}>
-        Apri cartella
-      </Button>
-    </div>
+{#snippet actions()}
+  <Button
+    onclick={handleRetry}
+    disabled={session.locked}
+    title={session.locked ? "Attendi la fine della registrazione o della trascrizione in corso" : undefined}
+  >
+    Rilancia trascrizione
+  </Button>
+  <Button onclick={() => entry && revealItemInDir(entry.folder_path)}>
+    Apri cartella
+  </Button>
+{/snippet}
 
-    <div class="rounded-xl border border-brand-cream/10 bg-brand-darker px-5 py-4">
-      {#if entry.transcript}
-        <TranscriptView transcript={entry.transcript} />
-      {:else if entry.error}
-        <p class="m-0 text-sm text-red-400">Trascrizione fallita: {entry.error}</p>
-      {:else}
-        <p class="m-0 text-sm text-brand-cream/50">
-          Trascrizione non ancora disponibile.
-        </p>
-      {/if}
-    </div>
+<div class="flex h-full w-full flex-col">
+  <PageHeader
+    title={entry?.name ?? "Registrazione"}
+    onBack={() => push("/list")}
+    actions={entry ? actions : undefined}
+  />
 
-    <TranscriptNotes
-      {entry}
-      llmStatus={servers.llmStatus}
-      llmReady={servers.llmReady}
-      onLlmRefresh={servers.refreshLlm}
-    />
-  {/if}
+  <div class="flex flex-1 flex-col overflow-y-auto px-6 pt-5 pb-18">
+    {#if !entry}
+      <p class="text-sm text-brand-cream/50">
+        {resolving ? "Caricamento..." : "Registrazione non trovata."}
+      </p>
+    {:else}
+      <!-- La pagina è a tutta larghezza, il testo no: oltre una settantina di
+           caratteri per riga l'occhio perde il capo della riga successiva. -->
+      <div class="mx-auto flex w-full max-w-[72ch] flex-col gap-4">
+        <div class="rounded-xl border border-brand-cream/10 bg-brand-darker px-5 py-4">
+          {#if entry.transcript}
+            <TranscriptView transcript={entry.transcript} />
+          {:else if entry.error}
+            <p class="m-0 text-sm text-red-400">Trascrizione fallita: {entry.error}</p>
+          {:else}
+            <p class="m-0 text-sm text-brand-cream/50">
+              Trascrizione non ancora disponibile.
+            </p>
+          {/if}
+        </div>
+
+        <TranscriptNotes
+          {entry}
+          llmStatus={servers.llmStatus}
+          llmReady={servers.llmReady}
+          onLlmRefresh={servers.refreshLlm}
+        />
+      </div>
+    {/if}
+  </div>
 </div>

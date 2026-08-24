@@ -157,13 +157,29 @@ Navigazione con `push` (`svelte-spa-router`), tranne due casi: le impostazioni c
 
 Nessuna route è lazy-loaded: sono quattro componenti già nel bundle, il code splitting non ripagherebbe l'attesa alla prima navigazione.
 
+### Layout delle pagine
+
+Il guscio in `App.svelte` è `flex h-screen flex-col overflow-hidden`, senza padding né centraggio: ogni rotta decide la propria larghezza e lo scroll vive dentro la rotta, così l'header di pagina può restare `sticky`.
+
+Le tre pagine interne hanno la stessa struttura: `PageHeader` in cima, poi un contenitore `flex-1 overflow-y-auto px-6 pt-5 pb-18` a tutta larghezza. Il `pb-18` lascia passare la pillola di stato e il bottone impostazioni, che sono `fixed` in basso.
+
+La larghezza piena vale per lista e impostazioni. Fanno eccezione due punti, per leggibilità: il testo della trascrizione e le note stanno in una colonna `max-w-[72ch]` centrata, e la griglia delle impostazioni si ferma a `max-w-400` (1600px) — oltre, le sue due colonne si stirerebbero lasciando una voragine in mezzo.
+
+### `PageHeader.svelte`
+
+Header comune alle rotte interne: bottone back solo-icona (`ArrowLeft`, `variant="icon"`) sempre nella stessa posizione in alto a sinistra, titolo, e uno snippet `actions` opzionale allineato a destra. `sticky top-0` con `backdrop-blur`, così resta visibile mentre il contenuto scorre sotto.
+
+Prop: `title: string`, `onBack: () => void`, `actions?: Snippet`.
+
+Il bottone "vai alla lista" **non** sta qui: vive in `Recorder.svelte`, `fixed` in alto a destra. Nelle pagine interne si sovrapporrebbe alle azioni dell'header.
+
 ## Componenti Svelte
 
 Svelte 5 con le rune (`$state`, `$derived`, `$effect`, `$props`), un componente per file sotto `src/lib/`. Lo stato condiviso sta nelle store qui sopra; le props restano per ciò che è locale a un singolo albero. I componenti-route ricevono dal router solo `params`: tutto il resto lo leggono dalle store.
 
 ### `App.svelte` (root)
 
-Guscio dell'app, senza stato proprio: monta `<Router>`, il bottone lista in alto a destra e `SttIndicator`, che restano visibili su ogni rotta.
+Guscio dell'app, senza stato proprio: monta `<Router>` e `SttIndicator` (pillola di stato e bottone impostazioni, `fixed` in basso, visibili su ogni rotta).
 
 Rendering condizionato da `servers.modelReady`, valutato allo stesso modo indipendentemente dal motivo per cui il modello manca (primo avvio mai configurato, o modello eliminato in un secondo momento dalle impostazioni): se `!modelReady` l'intera UI normale — router compreso — è sostituita da `Onboarding` a schermo intero, nessun ramo separato per i due casi.
 
@@ -184,7 +200,7 @@ La schermata REC, estratta da `App.svelte` quando è diventata una rotta. Botton
 
 ### `SttIndicator.svelte`
 
-Due elementi flottanti in basso: il pulsante impostazioni a destra e la pillola di stato a sinistra.
+Due elementi flottanti in basso, presenti su ogni rotta: il pulsante impostazioni a destra (naviga a `/settings`) e la pillola di stato a sinistra. Unica prop: `status: SttStatus`.
 
 | Stato | Dot | Label |
 |---|---|---|
@@ -205,9 +221,9 @@ Prop: `onContinue: () => void`, chiamata dal bottone "Continua"; `App.svelte` la
 
 ### `SettingsPanel.svelte`
 
-Rotta `/settings` con permessi OS, download dei modelli, controllo server STT/LLM e percorsi. Corpo a griglia (`grid-cols-1 lg:grid-cols-2`); header e bottone Salva stanno fuori dalla griglia. Colonna sinistra (core, sempre rilevante): Permessi, Modello Whisper, Server STT, Cartella registrazioni. Colonna destra (opzionale, additiva): Modello LLM, Server LLM — stessa distinzione già in [`architecture.md`](architecture.md) fra STT (sempre necessario) e LLM (riassunto/chat, lazy). Sotto il breakpoint `lg` (1024px) le due colonne si impilano in una sola. La sezione permessi viene per prima perché blocca tutto il resto.
+Rotta `/settings` con permessi OS, download dei modelli, controllo server STT/LLM e percorsi. Corpo a griglia (`grid-cols-1 md:grid-cols-2`, tetto `max-w-400`); il bottone Salva sta nelle `actions` del `PageHeader`, non in fondo alla pagina. Colonna sinistra (core, sempre rilevante): Permessi, Modello Whisper, Server STT, Cartella registrazioni. Colonna destra (opzionale, additiva): Modello LLM, Server LLM — stessa distinzione già in [`architecture.md`](architecture.md) fra STT (sempre necessario) e LLM (riassunto/chat, lazy). Sotto il breakpoint `md` (768px) le due colonne si impilano in una sola. La sezione permessi viene per prima perché blocca tutto il resto.
 
-Nessuna prop: era un modal con otto props passate da `App.svelte`, ora legge `servers` e `session` direttamente. La X e il salvataggio chiudono con `pop()`, non con una callback del genitore.
+Nessuna prop: era un modal con otto props passate da `App.svelte`, ora legge `servers` e `session` direttamente. Back e salvataggio chiudono con `pop()`, non con una callback del genitore.
 
 Le sezioni server STT e LLM sono due istanze di `ServerControls.svelte` (vedi sotto). Tutti i comandi server passano da due helper interni (`runStt(cmd, opts?)` / `runLlm(cmd)`: busy flag, `invoke`, refresh dello stato in `App.svelte`, errore nella card di stato); lato STT:
 - **Avvia** → `start_stt_server`, poi `servers.refreshStt()`
