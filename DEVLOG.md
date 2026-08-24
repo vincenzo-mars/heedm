@@ -34,6 +34,8 @@ Formato:
 - Il poll di `/health` dell'LLM passa da `$effect` in un componente a `setInterval` nella store: non deve più dipendere da chi è montato
 
 **Prossimi passi:**
+- **Riorganizzare `src/lib/` in cartelle** invece di tenere tutti i componenti sfusi: `stores/` è il primo passo, mancano le altre (rotte, componenti condivisi, feature). Richiesto esplicitamente
+- **Rivedere la disposizione delle impostazioni**: oggi sono ancora le due colonne del vecchio modal (core a sinistra, LLM a destra) messe dentro una pagina intera. Da ripensare per la larghezza che hanno adesso, non da adattare
 - Timer di registrazione visibile anche fuori dalla rotta `/`: con le pagine intere si può entrare nelle impostazioni mentre si registra e perdere di vista tempo e stop
 - Giro a click da verificare a mano (lista → dettaglio → impostazioni → back, e reload con hash su `/detail/:id`): niente `cliclick` e UI scripting negato su questa macchina
 
