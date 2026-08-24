@@ -136,6 +136,36 @@ Il download scrive su un file temporaneo `<model>.bin.part` nella stessa cartell
 
 Le primitive di processo/porta (`port_is_open`, `wait_for_port`, `spawn_tracked`, `stop_tracked_server`, `kill_tracked`, `default_threads`) vivono in `commands/server.rs`, condivise con il server LLM (vedi sotto): la logica di stop porta due invarianti non ovvi (guard rilasciato prima di ogni `.await`, mai kill-by-porta) che una copia-incolla fra due domini avrebbe finito per rompere in uno dei due punti. `spawn_tracked` (spawn + registrazione del child nello slot) e `default_threads` (core meno due, mai sotto 1) sono l'equivalente per l'avvio; `kill_tracked` è il kill best-effort usato alla chiusura dell'app.
 
+Due dettagli servono a non lasciare server orfani, cioè processi vivi che tengono la porta occupata senza che nessuno li tracci più (al riavvio successivo l'app li trova e rifiuta di fermarli, vedi il caso orfano più sotto):
+
+- `spawn_tracked` imposta `kill_on_drop(true)`: se il `Child` viene droppato senza un kill esplicito (unwind da panic, o un errore a metà di `stop_tracked_server`), tokio termina il processo invece di abbandonarlo.
+- `stop_tracked_server` toglie il child dallo slot con `take()` **prima** di killarlo: se `start_kill` fallisce il segnale non è mai partito, quindi il child va rimesso nello slot prima di propagare l'errore. Un `wait` fallito invece non si recupera, perché a quel punto il SIGKILL è già stato inviato.
+
+Nessuno dei due copre la morte violenta dell'app (SIGKILL sul processo padre, Force Quit, logout): lì `RunEvent::ExitRequested` non viene mai emesso e nessun codice del padre gira più. È il motivo per cui un `whisper-server` può sopravvivere a una sessione terminata da un segnale esterno, ad esempio un `tauri dev` ucciso dal terminale invece che chiuso dalla finestra. Quel caso non si previene: si rimedia alla sessione successiva, con il lockfile.
+
+### Lockfile del processo
+
+Un server sopravvissuto a una morte violenta tiene la porta, e senza altre informazioni è indistinguibile da un processo di terzi: l'app non può né riusarlo con cognizione né fermarlo, perché l'invariante "mai kill-by-porta" (sopra) le impedisce di terminare qualcosa che non ha avviato lei.
+
+`spawn_tracked` scrive quindi `<app_data_dir>/run/<nome>.json` (`whisper.json`, `llm.json`) con quattro campi:
+
+| Campo | A cosa serve |
+|---|---|
+| `pid` | Chi terminare, quando il processo non è più un `Child` |
+| `bin` | Riconoscere il processo: deve essere il nostro binario |
+| `started_at` | Difesa contro il riciclo dei pid, nel formato grezzo di `ps -o lstart=` |
+| `model` | Sapere cosa ha in RAM: un `llama-server` orfano può avere un GGUF diverso da quello ora selezionato |
+
+`read_valid_lock` restituisce il lock **solo** se `ps -p <pid> -o lstart=,comm=` conferma sia il binario sia l'istante di avvio; altrimenti il lock è spazzatura di una sessione passata e viene cancellato senza mandare nessun segnale. È l'unica cosa che autorizza `kill_pid`: un pid non verificato può essere stato riassegnato dall'OS a un processo di qualcun altro.
+
+Sui tre punti in cui la porta è occupata ma lo slot `Child` è vuoto:
+
+- **avvio** (`try_adopt_running_server`): lock valido e modello atteso → si **adotta** il processo così com'è, senza ricaricare il modello; lock valido ma modello diverso → si termina e si rispawna; nessun lock valido → si usa comunque quello che risponde sulla porta, come l'app ha sempre fatto (è il flusso di chi avvia un server a mano per debug, vedi la skill `run-heedm`), e sarà lo stop a rifiutarsi di terminarlo
+- **stop** (`stop_tracked_server`): lock valido → SIGKILL per pid e attesa del rilascio della porta; altrimenti l'errore di sempre, che chiede di chiudere il processo a mano
+- **chiusura dell'app** (`kill_tracked`): stesso trattamento. Senza questo ramo un processo adottato non verrebbe mai terminato e verrebbe riadottato a ogni sessione, all'infinito
+
+Due limiti accettati: `ps -o lstart=` formatta la data secondo il locale, quindi un cambio di locale fra due sessioni fa fallire il confronto e l'app non adotta (degrada verso la prudenza, mai verso il kill sbagliato); e due istanze di heedm in parallelo condividono il lockfile, con la seconda che adotterebbe il server della prima.
+
 `WhisperServerState` tiene l'unico handle al processo. `start_local_server`:
 
 1. Se la porta 8080 è già in ascolto, esce subito

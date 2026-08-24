@@ -62,6 +62,14 @@ fn settings_path(app: &AppHandle) -> PathBuf {
     app_data_dir(app).join("settings.json")
 }
 
+/// Lockfile del processo di un server locale (`whisper`, `llm`): sopravvive
+/// alla morte violenta dell'app ed è l'unico modo, alla sessione successiva,
+/// di distinguere un nostro orfano da un processo di terzi che occupa la
+/// stessa porta (vedi `server.rs`).
+pub(crate) fn server_lock_path(app: &AppHandle, name: &str) -> PathBuf {
+    app_data_dir(app).join("run").join(format!("{name}.json"))
+}
+
 fn model_dir(app: &AppHandle, settings: &SttSettings) -> PathBuf {
     match &settings.model_dir {
         Some(dir) => PathBuf::from(dir),

@@ -23,8 +23,8 @@ Gli helper di percorso (`model_dir`, `local_model_path`, `recordings_dir`, `bund
 | Command | Input | Output | Effetti |
 |---|---|---|---|
 | `download_local_model` | — | `Result<(), String>` | Scarica il modello in streaming su `<model>.bin.part`, emette `download-progress`, fa rename atomico a fine download e aggiorna `local_ready` (informativo, vedi sopra) |
-| `start_stt_server` | — | `Result<(), String>` | Spawna `whisper-server` se la porta è libera, attende fino a 60s |
-| `stop_stt_server` | — | `Result<(), String>` | Killa il processo tracciato, attende che la porta 8080 si liberi (timeout 5s). Errore esplicito se la porta è occupata da un processo non tracciato (orfano) |
+| `start_stt_server` | — | `Result<(), String>` | Spawna `whisper-server` se la porta è libera e attende fino a 60s. Se la porta è già occupata, il lockfile decide: nostro processo col modello atteso → adottato senza rispawn, nostro col modello diverso → terminato e rispawnato, altrimenti si usa quello che risponde (vedi [`architecture.md`](architecture.md)) |
+| `stop_stt_server` | — | `Result<(), String>` | Killa il processo tracciato, attende che la porta 8080 si liberi (timeout 5s). Se lo slot è vuoto ma la porta è occupata, termina per pid solo un processo che il lockfile riconosce come nostro; altrimenti errore esplicito |
 | `restart_stt_server` | — | `Result<(), String>` | `stop_stt_server` + `start_stt_server`; fallisce con lo stesso errore se lo stop fallisce |
 | `delete_local_model` | — | `Result<(), String>` | Ferma il server (il processo tiene il `.bin` aperto), poi cancella il file del modello. Errore se lo stop fallisce |
 | `check_stt_server` | — | `String` | `"running"` oppure `"stopped"` |

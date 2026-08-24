@@ -53,8 +53,14 @@ pub fn run() {
 
     app.run(|app_handle, event| {
         if let tauri::RunEvent::ExitRequested { .. } = event {
-            commands::server::kill_tracked(&app_handle.state::<WhisperServerState>().0);
-            commands::server::kill_tracked(&app_handle.state::<LlamaServerState>().0);
+            commands::server::kill_tracked(
+                &app_handle.state::<WhisperServerState>().0,
+                &commands::server_lock_path(app_handle, commands::stt::STT_LOCK),
+            );
+            commands::server::kill_tracked(
+                &app_handle.state::<LlamaServerState>().0,
+                &commands::server_lock_path(app_handle, commands::llm::LLM_LOCK),
+            );
         }
     });
 }
