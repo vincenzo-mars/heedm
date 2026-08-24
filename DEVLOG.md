@@ -13,6 +13,25 @@ Formato:
 
 ---
 
+## 2026-08-24 — Server orfani: due buchi nel cleanup dei processi figli
+
+**Obiettivo:** indagare un `whisper-server` sopravvissuto alla chiusura dell'app, e chiudere i percorsi che possono lasciare un figlio vivo ma non più tracciato.
+
+**Indagine:** il kill-on-exit funziona. Con sonde temporanee su `RunEvent` e su `kill_tracked`, la chiusura dalla finestra produce `CloseRequested → Destroyed → ExitRequested` e poi `slot=Some(pid=...) start_kill=Ok(())`, senza processi residui. L'orfano osservato aveva un'altra causa: nel log il figlio ha stampato `whisper server listening` **dopo** la morte del padre, avendo completato tranquillamente il caricamento del modello. Un processo che riceve SIGKILL non finisce di caricare: nessun segnale l'aveva raggiunto, perché l'app era stata terminata da un segnale esterno (lanciata come task di background) e `ExitRequested` non era mai stato emesso.
+
+**Fatto (`commands/server.rs`):**
+- `spawn_tracked`: `kill_on_drop(true)`, così un `Child` droppato senza kill esplicito (unwind da panic, errore a metà stop) non lascia il processo vivo
+- `stop_tracked_server`: se `start_kill` fallisce il child viene rimesso nello slot prima di propagare l'errore. Prima usciva dallo slot con `take()` e veniva droppato con l'errore: processo vivo, porta occupata, e `kill_tracked` alla chiusura trovava lo slot vuoto
+
+**Decisioni:**
+- Recupero dello slot **solo** su `start_kill` fallito, non su `wait` fallito: nel secondo caso il SIGKILL è già partito e il processo muore comunque, ritracciarlo lascerebbe nello slot un child morto
+- Niente handler di segnali per SIGTERM/SIGINT: coprirebbe la chiusura da terminale ma non SIGKILL, e per un'app desktop il percorso reale è la chiusura dalla finestra, che già funziona. Documentato in `architecture.md` come limite noto invece di aggiungere una dipendenza
+- Il ramo `if port_is_open { return Ok(()) }` di `start_local_server` resta invariato: adottare un processo non proprio per poi killarlo violerebbe l'invariante "mai kill-by-porta" (2026-07-30)
+
+**Verificato:** `cargo check` pulito; a runtime Spegni → Avvia → chiusura finestra non lascia processi né porte occupate. Il secondo server è stato ucciso mentre era ancora in caricamento (nel log manca `listening`), cioè esattamente la condizione che aveva prodotto l'orfano.
+
+---
+
 ## 2026-08-24 — Slimming pass: dead code, dedup, ottimizzazioni runtime
 
 **Obiettivo:** ridurre il codice senza togliere feature: tagliare il codice morto verificato, deduplicare i pattern ripetuti, sistemare le inefficienze runtime a basso rischio.

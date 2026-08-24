@@ -136,6 +136,13 @@ Il download scrive su un file temporaneo `<model>.bin.part` nella stessa cartell
 
 Le primitive di processo/porta (`port_is_open`, `wait_for_port`, `spawn_tracked`, `stop_tracked_server`, `kill_tracked`, `default_threads`) vivono in `commands/server.rs`, condivise con il server LLM (vedi sotto): la logica di stop porta due invarianti non ovvi (guard rilasciato prima di ogni `.await`, mai kill-by-porta) che una copia-incolla fra due domini avrebbe finito per rompere in uno dei due punti. `spawn_tracked` (spawn + registrazione del child nello slot) e `default_threads` (core meno due, mai sotto 1) sono l'equivalente per l'avvio; `kill_tracked` è il kill best-effort usato alla chiusura dell'app.
 
+Due dettagli servono a non lasciare server orfani, cioè processi vivi che tengono la porta occupata senza che nessuno li tracci più (al riavvio successivo l'app li trova e rifiuta di fermarli, vedi il caso orfano più sotto):
+
+- `spawn_tracked` imposta `kill_on_drop(true)`: se il `Child` viene droppato senza un kill esplicito (unwind da panic, o un errore a metà di `stop_tracked_server`), tokio termina il processo invece di abbandonarlo.
+- `stop_tracked_server` toglie il child dallo slot con `take()` **prima** di killarlo: se `start_kill` fallisce il segnale non è mai partito, quindi il child va rimesso nello slot prima di propagare l'errore. Un `wait` fallito invece non si recupera, perché a quel punto il SIGKILL è già stato inviato.
+
+Nessuno dei due copre la morte violenta dell'app (SIGKILL sul processo padre, Force Quit, logout): lì `RunEvent::ExitRequested` non viene mai emesso e nessun codice del padre gira più. È il motivo per cui un `whisper-server` può sopravvivere a una sessione terminata da un segnale esterno, ad esempio un `tauri dev` ucciso dal terminale invece che chiuso dalla finestra.
+
 `WhisperServerState` tiene l'unico handle al processo. `start_local_server`:
 
 1. Se la porta 8080 è già in ascolto, esce subito
