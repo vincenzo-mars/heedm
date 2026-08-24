@@ -13,7 +13,28 @@ Formato:
 
 ---
 
-## 2026-08-03 — Download del modello LLM con progress bar, Impostazioni full-width
+## 2026-08-24 — Slimming pass: dead code, dedup, ottimizzazioni runtime
+
+**Obiettivo:** ridurre il codice senza togliere feature: tagliare il codice morto verificato, deduplicare i pattern ripetuti, sistemare le inefficienze runtime a basso rischio.
+
+**Fatto (backend):**
+- Rimossi: comando `get_recording_status` + struct `RecordingStatus` (il cronometro è ora un timer locale del frontend, niente poll IPC a 500ms), campo `SttSettings.configured` (scritto e mai letto), `HfModelSummary.likes` e `HfModelDetail.context_length` (fetchati e mai mostrati), `RecorderInner.start_time` (letto solo dal comando rimosso)
+- Dipendenza `sysinfo` rimossa: `get_system_memory_gb` legge `hw.memsize` via sysctl (macOS) / `/proc/meminfo` (Linux)
+- `server.rs`: nuovi helper condivisi `default_threads`, `spawn_tracked`, `kill_tracked` (dedup con stt/llm/lib.rs); `wait_for_port` polla a 250ms invece che 1s
+- `download.rs`: evento di progresso emesso solo al cambio di percentuale intera (prima: uno per chunk, decine di migliaia di eventi IPC su un modello da GB)
+- `stt.rs`: upload trascrizione in streaming dal file (`Part::stream`), non più tutto il WAV in RAM
+- `recording.rs`: in `stop_recording` il DSP (to_mono/resample/AEC/write_wav) gira in `spawn_blocking` fuori dal lock del RecorderState
+- `mic.rs`: un solo builder generico (`SizedSample` + `FromSample`) per F32/I16/U16
+
+**Fatto (frontend):**
+- `Button.svelte`: varianti `solid`/`danger`/`primary` al posto delle stringhe di classi copiate 10+ volte
+- Nuovi `ServerControls.svelte` (blocco stato+bottoni server, usato 2x da SettingsPanel) e `DownloadProgressBar.svelte` (Onboarding + SettingsPanel x2)
+- `SettingsPanel.svelte`: gli 8 handler server collassati in `runStt`/`runLlm`; i 3 box percorso in uno snippet locale `pathBox`; ricerca HF lazy (prima fetch al primo focus del campo, non all'apertura del pannello); ~750 → ~530 righe
+- `onSaved` di SettingsPanel ora `() => void` (il parametro non era usato)
+
+**Decisioni:**
+- La conversione U16→f32 del mic ora passa da dasp (`FromSample`), che gestisce l'offset unsigned correttamente: differenza dall'implementazione a mano precedente trascurabile (< 1 LSB)
+- Non unificati: `refreshSttState`/`refreshLlmState` (default e stati diversi, l'unificazione costa più leggibilità di quanta ne renda), `WhisperServerState`/`LlamaServerState` (lo state Tauri è type-keyed), AEC O(lag×finestra) (~100ms in release, FFT sarebbe ottimizzazione prematura)
 
 **Obiettivo:** un bottone di download esplicito per il modello LLM (oggi implicito nel bottone "Avvia" del server, senza feedback), con una progress bar reale; allargare il modal Impostazioni, oggi un singolo modal stretto di 420px.
 

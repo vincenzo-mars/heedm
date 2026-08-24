@@ -6,7 +6,9 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
 use super::download::download_to_file;
-use super::server::{port_is_open, stop_tracked_server, wait_for_port};
+use super::server::{
+    default_threads, port_is_open, spawn_tracked, stop_tracked_server, wait_for_port,
+};
 use super::{bundled_bin_path, get_stt_settings, local_model_path, save_stt_settings, STT_PORT};
 
 const MODEL_URL: &str =
@@ -58,12 +60,9 @@ async fn start_local_server(app: AppHandle) -> Result<(), String> {
     // Flash attention e numero di thread non hanno UI: si deducono dalla
     // macchina. `-fa` esiste solo dalle build recenti di whisper.cpp (vedi
     // scripts/build-whisper-server.sh, tag pinnato).
-    let threads = std::thread::available_parallelism()
-        .map(|n| n.get().saturating_sub(2).max(1))
-        .unwrap_or(4);
-
-    let child = tokio::process::Command::new(&bin)
-        .args([
+    spawn_tracked(
+        &bin,
+        &[
             "--model",
             model,
             "--host",
@@ -71,16 +70,11 @@ async fn start_local_server(app: AppHandle) -> Result<(), String> {
             "--port",
             &STT_PORT.to_string(),
             "--threads",
-            &threads.to_string(),
+            &default_threads().to_string(),
             "--flash-attn",
-        ])
-        .spawn()
-        .map_err(|e| e.to_string())?;
-
-    match app.state::<WhisperServerState>().0.lock() {
-        Ok(mut guard) => *guard = Some(child),
-        Err(e) => return Err(format!("Stato del server whisper corrotto: {e}")),
-    }
+        ],
+        &app.state::<WhisperServerState>().0,
+    )?;
 
     wait_for_port(STT_PORT, 60).await
 }
@@ -184,11 +178,12 @@ async fn run_transcription(path: &str) -> Result<TranscriptResult, String> {
     let started = std::time::Instant::now();
 
     // I file prodotti da Heedm sono già nel formato che whisper.cpp richiede
-    // (16kHz 16-bit PCM), quindi vanno inviati così come sono: nessuna
-    // conversione intermedia, nessuna seconda copia in memoria.
-    let file_bytes = tokio::fs::read(path).await.map_err(|e| e.to_string())?;
+    // (16kHz 16-bit PCM), quindi vanno inviati così come sono. In streaming
+    // dal file, non caricati in memoria: un'ora di stereo sono ~230MB che non
+    // hanno motivo di stare in RAM durante l'upload.
+    let file = tokio::fs::File::open(path).await.map_err(|e| e.to_string())?;
 
-    let part = reqwest::multipart::Part::bytes(file_bytes)
+    let part = reqwest::multipart::Part::stream(file)
         .file_name("audio.wav")
         .mime_str("audio/wav")
         .map_err(|e| e.to_string())?;

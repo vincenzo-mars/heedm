@@ -77,13 +77,14 @@ Il downmix a mono è voluto e va tenuto: i canali L/R di un file esterno (un exp
 | Campo | Tipo | Ruolo |
 |---|---|---|
 | `is_recording` | `bool` | Guardia contro doppio start/stop |
-| `start_time` | `Option<Instant>` | Base per `duration_ms` |
 | `mic_samples` / `sys_samples` | `Arc<Mutex<Vec<f32>>>` | Buffer di cattura, scritti dai callback audio |
 | `mic_stream` | `Option<cpal::Stream>` | Va tenuto vivo: dropparlo ferma la cattura |
 | `sys_capture` | `Option<Box<dyn SysAudioStop>>` | Handle della cattura di sistema |
 | `sample_rate` | `u32` | Rate di **output**, fisso a `TARGET_SAMPLE_RATE` |
 | `mic_native_rate` | `u32` | Rate nativo del device, dipende dall'hardware |
 | `channels` | `u16` | Canali del microfono; serve solo a `to_mono` |
+
+In `stop_recording` il lock serve solo a estrarre buffer e parametri: downmix, resample, AEC e scrittura WAV (CPU-bound su minuti di audio) girano in `spawn_blocking`, mai dentro il lock né sul runtime async — altrimenti bloccherebbero ogni altro command per la durata del calcolo. Il cronometro in UI è un timer locale del frontend (che è l'unico a poter avviare la registrazione): nessun polling IPC verso il backend.
 
 ### Microfono (`recorder/mic.rs`)
 
@@ -133,14 +134,14 @@ Il download scrive su un file temporaneo `<model>.bin.part` nella stessa cartell
 
 ### Ciclo di vita del server
 
-Le primitive di processo/porta (`port_is_open`, `wait_for_port`, `stop_tracked_server`) vivono in `commands/server.rs`, condivise con il server LLM (vedi sotto): la logica di stop porta due invarianti non ovvi (guard rilasciato prima di ogni `.await`, mai kill-by-porta) che una copia-incolla fra due domini avrebbe finito per rompere in uno dei due punti.
+Le primitive di processo/porta (`port_is_open`, `wait_for_port`, `spawn_tracked`, `stop_tracked_server`, `kill_tracked`, `default_threads`) vivono in `commands/server.rs`, condivise con il server LLM (vedi sotto): la logica di stop porta due invarianti non ovvi (guard rilasciato prima di ogni `.await`, mai kill-by-porta) che una copia-incolla fra due domini avrebbe finito per rompere in uno dei due punti. `spawn_tracked` (spawn + registrazione del child nello slot) e `default_threads` (core meno due, mai sotto 1) sono l'equivalente per l'avvio; `kill_tracked` è il kill best-effort usato alla chiusura dell'app.
 
 `WhisperServerState` tiene l'unico handle al processo. `start_local_server`:
 
 1. Se la porta 8080 è già in ascolto, esce subito
 2. Verifica che il modello esista su disco
 3. Spawna il binario con `--model/--host/--port`, più `--flash-attn` e `--threads`
-4. Polla la porta ogni secondo fino a 60s
+4. Polla la porta ogni 250ms fino a 60s
 
 Flash attention e numero di thread non hanno UI: si deducono dalla macchina (`available_parallelism` meno due, per lasciare respiro al resto del sistema). `--flash-attn` esiste solo dalle build recenti di whisper.cpp, quindi il tag pinnato in `scripts/build-whisper-server.sh` e i flag passati qui devono restare allineati: passare `-fa` a un binario vecchio lo fa uscire con un errore di parsing.
 
@@ -150,7 +151,7 @@ In `lib.rs` l'app è costruita con `.build()` invece di `.run()` diretto, così 
 
 ### Trascrizione
 
-`transcribe_recording` legge il WAV e lo invia in multipart a `POST /inference` con `language=it`, `response_format=verbose_json` e `diarize=true`. Il file **non** viene convertito: quello che Heedm produce è già mono/stereo 16kHz 16-bit PCM, cioè esattamente ciò che `read_wav` accetta.
+`transcribe_recording` invia il WAV in multipart a `POST /inference` con `language=it`, `response_format=verbose_json` e `diarize=true`, in streaming dal file (`Part::stream`, mai caricato per intero in RAM). Il file **non** viene convertito: quello che Heedm produce è già mono/stereo 16kHz 16-bit PCM, cioè esattamente ciò che `read_wav` accetta.
 
 Il risultato viene arricchito con `transcription_ms` (misurato lato client, non presente nella risposta del server) e scritto come `transcript.json` accanto al WAV.
 
@@ -194,13 +195,13 @@ La classe `Chat` del binding Svelte di Vercel AI SDK richiede un backend HTTP pr
 
 A differenza di quanto ci si aspetterebbe, **il modello non viene scaricato da `llama-server`**: pur supportando nativamente `--hf-repo <owner/repo> --hf-file <filename>`, la sua barra di progresso nativa (`Downloading <file> ─────╴ NN%`) è emessa da `common/download.cpp` dietro un check `!is_output_a_tty()` — sotto `Stdio::piped()` (necessario per catturare l'output da un processo Tauri) non produce assolutamente nulla, quindi non è osservabile per costruire una progress bar (vedi `DEVLOG.md`). Duplicare il layout della cache nativa di llama-server per pre-scaricare il file altrove è stato scartato a sua volta: usa uno schema hash-based (`models--org--repo/blobs/<hash>`, stile huggingface_hub) con file serviti spesso via redirect a storage "Xet", non banalmente riproducibile lato nostro.
 
-`download_llm_model` (`commands/llm.rs`, via l'helper condiviso `commands/download.rs`) scarica quindi il GGUF da sé via `reqwest`, stesso identico pattern di `download_local_model` per whisper: stream diretto da `https://huggingface.co/<repo>/resolve/main/<file>`, scrittura su `.part`, evento di progresso (`llm-download-progress`) per ogni chunk, rename atomico a fine stream. Il file finisce in `<model_dir>/llm-models/<org>--<repo>/<file>.gguf` (slash sanitizzato in `--`, nessun hash: percorso ispezionabile a mano). `start_llm_server` passa quel percorso a `llama-server` con `--model <path>`, non più `--hf-repo`/`--hf-file`, e fallisce subito se il file non esiste ancora sul disco. Il repo/file/size scelti dall'utente sono persistiti in `SttSettings.llm_hf_repo`/`llm_hf_file`/`llm_size_bytes`; `llm_ready` è ricalcolato da `get_stt_settings` verificando l'esistenza del file, esattamente come `local_ready` per whisper — mai la fonte di verità è il valore persistito.
+`download_llm_model` (`commands/llm.rs`, via l'helper condiviso `commands/download.rs`) scarica quindi il GGUF da sé via `reqwest`, stesso identico pattern di `download_local_model` per whisper: stream diretto da `https://huggingface.co/<repo>/resolve/main/<file>`, scrittura su `.part`, evento di progresso (`llm-download-progress`) a ogni cambio di percentuale intera (non per chunk: sarebbero decine di migliaia di eventi IPC su un file da GB), rename atomico a fine stream. Il file finisce in `<model_dir>/llm-models/<org>--<repo>/<file>.gguf` (slash sanitizzato in `--`, nessun hash: percorso ispezionabile a mano). `start_llm_server` passa quel percorso a `llama-server` con `--model <path>`, non più `--hf-repo`/`--hf-file`, e fallisce subito se il file non esiste ancora sul disco. Il repo/file/size scelti dall'utente sono persistiti in `SttSettings.llm_hf_repo`/`llm_hf_file`/`llm_size_bytes`; `llm_ready` è ricalcolato da `get_stt_settings` verificando l'esistenza del file, esattamente come `local_ready` per whisper — mai la fonte di verità è il valore persistito.
 
 Chi ha scaricato un modello con una versione precedente di heedm (quella con `--hf-repo`/`--hf-file`) ha la vecchia cache in `<model_dir>/llm-cache/` (layout hash-based sopra): non viene migrata automaticamente, resta finché l'utente preme "Elimina modelli scaricati" in Settings (`clear_llm_cache`, cancella entrambe le cartelle).
 
 ### Ricerca modelli: proxy Rust verso l'API di Hugging Face
 
-`search_hf_models`/`get_hf_model_files` (`commands/llm.rs`) interrogano `huggingface.co/api/models` via `reqwest` (lato Rust, non fetch diretta dal webview, per coerenza con l'unico altro precedente HTTP del progetto). `search_hf_models` filtra a `filter=gguf&pipeline_tag=text-generation`; `get_hf_model_files` chiama il dettaglio repo con `?blobs=true` (l'unico modo per ottenere `siblings[].size` reale) e segnala `gated` così la UI può disabilitare la selezione per i repo che richiederebbero autenticazione HF (non supportata). `get_system_memory_gb` (crate `sysinfo`) alimenta un badge euristico "consigliato per la tua RAM" sui file di dimensione diversa, mai bloccante.
+`search_hf_models`/`get_hf_model_files` (`commands/llm.rs`) interrogano `huggingface.co/api/models` via `reqwest` (lato Rust, non fetch diretta dal webview, per coerenza con l'unico altro precedente HTTP del progetto). `search_hf_models` filtra a `filter=gguf&pipeline_tag=text-generation`; `get_hf_model_files` chiama il dettaglio repo con `?blobs=true` (l'unico modo per ottenere `siblings[].size` reale) e segnala `gated` così la UI può disabilitare la selezione per i repo che richiederebbero autenticazione HF (non supportata). `get_system_memory_gb` (sysctl `hw.memsize` su macOS, `/proc/meminfo` su Linux: nessuna dipendenza) alimenta un badge euristico "consigliato per la tua RAM" sui file di dimensione diversa, mai bloccante.
 
 ### Ciclo di vita: `/health`, non solo la porta
 
@@ -243,7 +244,6 @@ Il download/scelta del modello LLM è opzionale e lazy: `Onboarding.svelte` rest
 | symphonia | 0.5 | Decodifica dei file importati, Rust puro, niente ffmpeg |
 | reqwest | 0.12 | HTTP verso whisper-server, Hugging Face (modello whisper e ricerca modelli LLM) |
 | tokio | 1.x | Runtime async |
-| sysinfo | 0.33 | RAM totale, per il badge "consigliato" nella ricerca modelli LLM |
 | tauri-plugin-http | 2.x | Fetch lato Rust per le chiamate AI SDK verso `llama-server` (evita ATS/CORS nel webview) |
 
 Frontend: `ai` (core, `streamText`) + `@ai-sdk/openai-compatible` per il provider locale, `@tauri-apps/plugin-http` per il fetch, tutti in `src/lib/llm.ts`. Deliberatamente **non** `@ai-sdk/svelte` (vedi sopra).

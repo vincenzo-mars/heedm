@@ -19,7 +19,6 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::recording::start_recording,
             commands::recording::stop_recording,
-            commands::recording::get_recording_status,
             commands::recording::import_audio_file,
             commands::recording::list_recordings,
             commands::stt::transcribe_recording,
@@ -54,25 +53,8 @@ pub fn run() {
 
     app.run(|app_handle, event| {
         if let tauri::RunEvent::ExitRequested { .. } = event {
-            let whisper_child = app_handle
-                .state::<WhisperServerState>()
-                .0
-                .lock()
-                .ok()
-                .and_then(|mut guard| guard.take());
-            if let Some(mut child) = whisper_child {
-                let _ = child.start_kill();
-            }
-
-            let llm_child = app_handle
-                .state::<LlamaServerState>()
-                .0
-                .lock()
-                .ok()
-                .and_then(|mut guard| guard.take());
-            if let Some(mut child) = llm_child {
-                let _ = child.start_kill();
-            }
+            commands::server::kill_tracked(&app_handle.state::<WhisperServerState>().0);
+            commands::server::kill_tracked(&app_handle.state::<LlamaServerState>().0);
         }
     });
 }

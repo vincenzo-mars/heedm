@@ -31,7 +31,6 @@ src-tauri/src/
     audio.rs                     # primitive condivise: rms, to_mono, resample, mix, WAV
     mic.rs                       # cattura microfono via cpal
     aec.rs                       # echo cancellation: toglie il system audio rientrato nel mic
-    diarization.rs               # timeline speaker (mic/sys/both) da energia dei due canali
     system_audio/
       mod.rs                     # routing platform-specific
       macos.rs                   # SCStream (ScreenCaptureKit)
@@ -45,9 +44,12 @@ src/
     types.ts                     # tipi e helper condivisi
     utils.ts                     # cn() (clsx + tailwind-merge)
     llm.ts                       # provider AI SDK, prompt, streaming (unico file che conosce l'AI SDK)
-    Button.svelte                # bottone dell'app (varianti ghost/icon)
+    Button.svelte                # bottone dell'app (varianti ghost/icon/solid/danger/primary)
+    Onboarding.svelte            # primo avvio: download modello whisper a schermo intero
     SttIndicator.svelte          # indicatore stato server STT
     SettingsPanel.svelte         # modal impostazioni/download modello/server STT+LLM
+    ServerControls.svelte        # stato + bottoni di un server locale (usato 2x da SettingsPanel)
+    DownloadProgressBar.svelte   # barra download modello (Onboarding + SettingsPanel)
     RecordsList.svelte           # lista registrazioni
     RecordingDetail.svelte       # dettaglio singola registrazione
     TranscriptView.svelte        # rendering trascrizione con speaker

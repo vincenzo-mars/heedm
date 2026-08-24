@@ -169,12 +169,6 @@ pub async fn import_audio_file(app: AppHandle) -> Result<Option<String>, String>
 
 // ── Registrazione ─────────────────────────────────────────────────────────────
 
-#[derive(Serialize)]
-pub struct RecordingStatus {
-    pub is_recording: bool,
-    pub duration_ms: u64,
-}
-
 #[derive(Serialize, Deserialize)]
 pub struct RecordingEntry {
     pub folder_path: String,
@@ -221,7 +215,6 @@ pub async fn start_recording(
     inner.mic_stream = Some(mic_info.stream);
     inner.sys_capture = sys_capture;
     inner.is_recording = true;
-    inner.start_time = Some(std::time::Instant::now());
 
     Ok(())
 }
@@ -231,7 +224,10 @@ pub async fn stop_recording(
     state: State<'_, RecorderState>,
     app: AppHandle,
 ) -> Result<String, String> {
-    let (samples, sample_rate, channels) = {
+    // Dal lock si esce solo con i buffer e i parametri: resample/AEC/scrittura
+    // su minuti di audio sono CPU-bound e non devono girare né dentro il lock
+    // (bloccherebbero ogni altro command) né sul runtime async.
+    let (mic_raw, sys, sr, ch, mic_native_rate, had_sys_audio) = {
         let mut inner = state.0.lock().await;
         if !inner.is_recording {
             return Err("Not recording".to_string());
@@ -243,19 +239,28 @@ pub async fn stop_recording(
             sys.stop()?;
         }
         inner.is_recording = false;
-        inner.start_time = None;
 
         let mic_raw = std::mem::take(&mut *inner.mic_samples.lock().unwrap());
         let sys = std::mem::take(&mut *inner.sys_samples.lock().unwrap());
-        let sr = inner.sample_rate;
-        let ch = inner.channels;
+        (
+            mic_raw,
+            sys,
+            inner.sample_rate,
+            inner.channels,
+            inner.mic_native_rate,
+            had_sys_audio,
+        )
+    };
 
+    let path = new_recording_path(&app).await?;
+    let wav_path = path.clone();
+    tokio::task::spawn_blocking(move || {
         // Il mic cattura al rate nativo del device (cpal non lo forza) e con il
         // numero di canali del device: portarlo a mono prima del resample è
         // obbligatorio, perché l'interpolazione lineare su buffer interleaved
         // mescolerebbe campioni di canali diversi.
         let mic = audio::to_mono(mic_raw, ch);
-        let mic = audio::resample_linear(&mic, inner.mic_native_rate, sr);
+        let mic = audio::resample_linear(&mic, mic_native_rate, sr);
 
         // AEC: rimuove dal mic l'echo acustico delle casse prima di scrivere il
         // file. Non è solo qualità audio: senza, l'audio di sistema rientrato nel
@@ -269,31 +274,17 @@ pub async fn stop_recording(
 
         // Con audio di sistema il file è stereo (mic a sinistra, sistema a
         // destra) così whisper può diarizzarlo da solo; senza, resta mono.
-        if had_sys_audio && !sys.is_empty() {
-            (audio::interleave_stereo(&mic, &sys), sr, 2)
+        let (samples, channels) = if had_sys_audio && !sys.is_empty() {
+            (audio::interleave_stereo(&mic, &sys), 2)
         } else {
-            (mic, sr, 1)
-        }
-    };
-
-    let path = new_recording_path(&app).await?;
-    audio::write_wav(&samples, &path, sample_rate, channels)?;
+            (mic, 1)
+        };
+        audio::write_wav(&samples, &wav_path, sr, channels)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
 
     Ok(path.to_string_lossy().to_string())
-}
-
-#[tauri::command]
-pub async fn get_recording_status(
-    state: State<'_, RecorderState>,
-) -> Result<RecordingStatus, String> {
-    let inner = state.0.lock().await;
-    Ok(RecordingStatus {
-        is_recording: inner.is_recording,
-        duration_ms: inner
-            .start_time
-            .map(|t| t.elapsed().as_millis() as u64)
-            .unwrap_or(0),
-    })
 }
 
 #[tauri::command]

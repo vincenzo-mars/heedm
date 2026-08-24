@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
 use super::download::download_to_file;
-use super::server::{port_is_open, stop_tracked_server};
+use super::server::{default_threads, port_is_open, spawn_tracked, stop_tracked_server};
 use super::{
     bundled_bin_path, get_stt_settings, llm_cache_dir, llm_model_path, llm_models_dir,
     save_stt_settings, LLM_PORT,
@@ -26,11 +26,54 @@ impl LlamaServerState {
     }
 }
 
+/// RAM totale letta direttamente dall'OS (sysctl su macOS, /proc/meminfo su
+/// Linux): un numero solo non giustifica la dipendenza `sysinfo`.
 #[tauri::command]
 pub fn get_system_memory_gb() -> f64 {
-    let mut sys = sysinfo::System::new();
-    sys.refresh_memory();
-    sys.total_memory() as f64 / 1024f64.powi(3)
+    total_memory_bytes() as f64 / 1024f64.powi(3)
+}
+
+#[cfg(target_os = "macos")]
+fn total_memory_bytes() -> u64 {
+    unsafe extern "C" {
+        fn sysctlbyname(
+            name: *const std::os::raw::c_char,
+            oldp: *mut std::os::raw::c_void,
+            oldlenp: *mut usize,
+            newp: *mut std::os::raw::c_void,
+            newlen: usize,
+        ) -> i32;
+    }
+    let mut value: u64 = 0;
+    let mut len = std::mem::size_of::<u64>();
+    let rc = unsafe {
+        sysctlbyname(
+            c"hw.memsize".as_ptr(),
+            &mut value as *mut u64 as *mut _,
+            &mut len,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if rc == 0 {
+        value
+    } else {
+        0
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn total_memory_bytes() -> u64 {
+    std::fs::read_to_string("/proc/meminfo")
+        .ok()
+        .and_then(|s| {
+            s.lines()
+                .find(|l| l.starts_with("MemTotal:"))
+                .and_then(|l| l.split_whitespace().nth(1))
+                .and_then(|kb| kb.parse::<u64>().ok())
+        })
+        .map(|kb| kb * 1024)
+        .unwrap_or(0)
 }
 
 /// A differenza di whisper-server, llama-server apre la porta prima ancora
@@ -64,12 +107,9 @@ pub async fn start_llm_server(app: AppHandle) -> Result<(), String> {
 
     let bin = bundled_bin_path(&app, "llama-server")?;
 
-    let threads = std::thread::available_parallelism()
-        .map(|n| n.get().saturating_sub(2).max(1))
-        .unwrap_or(4);
-
-    let child = tokio::process::Command::new(&bin)
-        .args([
+    spawn_tracked(
+        &bin,
+        &[
             "--model",
             model_path,
             "--host",
@@ -81,20 +121,15 @@ pub async fn start_llm_server(app: AppHandle) -> Result<(), String> {
             "--ctx-size",
             "16384",
             "--threads",
-            &threads.to_string(),
+            &default_threads().to_string(),
             "--n-gpu-layers",
             "999",
             "--parallel",
             "1",
             "--no-webui",
-        ])
-        .spawn()
-        .map_err(|e| e.to_string())?;
-
-    match app.state::<LlamaServerState>().0.lock() {
-        Ok(mut guard) => *guard = Some(child),
-        Err(e) => return Err(format!("Stato del server LLM corrotto: {e}")),
-    }
+        ],
+        &app.state::<LlamaServerState>().0,
+    )?;
 
     // Niente attesa di `/health` qui: il modello è già sul disco (vedi guard
     // sopra), ma caricare qualche GB in RAM/VRAM può comunque richiedere
@@ -188,7 +223,6 @@ const HF_API_BASE: &str = "https://huggingface.co/api/models";
 pub struct HfModelSummary {
     pub id: String,
     pub downloads: u64,
-    pub likes: u64,
     pub license: Option<String>,
 }
 
@@ -197,8 +231,6 @@ struct HfSearchEntry {
     id: String,
     #[serde(default)]
     downloads: u64,
-    #[serde(default)]
-    likes: u64,
     #[serde(default)]
     tags: Vec<String>,
 }
@@ -236,7 +268,6 @@ pub async fn search_hf_models(query: String) -> Result<Vec<HfModelSummary>, Stri
             license: license_from_tags(&e.tags),
             id: e.id,
             downloads: e.downloads,
-            likes: e.likes,
         })
         .collect())
 }
@@ -250,7 +281,6 @@ pub struct HfGgufFile {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct HfModelDetail {
     pub gated: bool,
-    pub context_length: Option<u64>,
     pub files: Vec<HfGgufFile>,
 }
 
@@ -262,12 +292,6 @@ struct HfSibling {
 }
 
 #[derive(Deserialize)]
-struct HfGgufMeta {
-    #[serde(default)]
-    context_length: Option<u64>,
-}
-
-#[derive(Deserialize)]
 struct HfModelDetailResponse {
     // Può essere `false`, `true`, o una stringa ("auto"/"manual") a seconda
     // della modalità di gating: qualunque cosa diversa da `false` è gated.
@@ -275,8 +299,6 @@ struct HfModelDetailResponse {
     gated: serde_json::Value,
     #[serde(default)]
     siblings: Vec<HfSibling>,
-    #[serde(default)]
-    gguf: Option<HfGgufMeta>,
 }
 
 /// I modelli GGUF molto grandi (40GB+) sono a volte pubblicati come più file
@@ -320,11 +342,7 @@ pub async fn get_hf_model_files(repo_id: String) -> Result<HfModelDetail, String
         })
         .collect::<Vec<_>>();
 
-    Ok(HfModelDetail {
-        gated,
-        context_length: detail.gguf.and_then(|g| g.context_length),
-        files,
-    })
+    Ok(HfModelDetail { gated, files })
 }
 
 // ── Note per registrazione (riassunto + chat) ──────────────────────────────────
