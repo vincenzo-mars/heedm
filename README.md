@@ -57,5 +57,6 @@ Richiede il binario `whisper-server` compilato in `src-tauri/binaries/` — vedi
 
 ## Documentazione
 
+- [`docs/onboarding.md`](docs/onboarding.md) — percorso di lettura del codice, per entrare nel repo
 - [`docs/architecture.md`](docs/architecture.md) — flusso dati end-to-end, pipeline audio, integrazione whisper
 - [`docs/reference.md`](docs/reference.md) — comandi Tauri, tipi condivisi, componenti Svelte
