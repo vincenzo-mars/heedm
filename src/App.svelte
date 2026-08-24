@@ -24,6 +24,7 @@ let transcribeMs = $state(0);
 let sttStatus = $state<SttStatus>("checking");
 let modelReady = $state(false);
 let llmStatus = $state<ServerStatus>("checking");
+let llmReady = $state(false);
 let showSettings = $state(false);
 let view = $state<"record" | "list" | "detail">("record");
 let selectedEntry = $state<RecordingEntry | null>(null);
@@ -97,6 +98,7 @@ async function refreshLlmState(
   llmStatus = "checking";
   try {
     const settings = await invoke<SttSettings>("get_stt_settings");
+    llmReady = settings.llmReady;
     const status = await invoke<string>("check_llm_server");
     if (status === "running") {
       llmStatus = "running";
@@ -333,6 +335,7 @@ async function retryTranscription(
         {isTranscribing}
         onRetry={retryTranscription}
         {llmStatus}
+        {llmReady}
         onLlmRefresh={refreshLlmState}
       />
     </main>

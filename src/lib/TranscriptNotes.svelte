@@ -19,10 +19,12 @@ import type {
 let {
   entry,
   llmStatus,
+  llmReady,
   onLlmRefresh,
 }: {
   entry: RecordingEntry;
   llmStatus: ServerStatus;
+  llmReady: boolean;
   onLlmRefresh: (opts?: {
     attemptStart?: boolean;
   }) => Promise<SttSettings | null>;
@@ -243,9 +245,16 @@ let hasContent = $derived(notes.summary != null || notes.messages.length > 0);
       {:else}
         <div class="flex flex-col items-start gap-2">
           <p class="m-0 text-sm text-brand-cream/50">
-            Genera un riassunto e apri una chat sulla trascrizione con un modello locale.
+            {llmReady
+              ? "Genera un riassunto e apri una chat sulla trascrizione con un modello locale."
+              : "Scarica un modello LLM dalle impostazioni per generare riassunto e chat sulla trascrizione."}
           </p>
-          <Button onclick={() => onLlmRefresh({ attemptStart: true })}>
+          <Button
+            class="disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-brand-cream/70"
+            onclick={() => onLlmRefresh({ attemptStart: true })}
+            disabled={!llmReady}
+            title={llmReady ? undefined : "Scarica prima il modello dalle impostazioni"}
+          >
             Avvia il server LLM
           </Button>
         </div>
