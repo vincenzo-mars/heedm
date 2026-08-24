@@ -1,45 +1,28 @@
 <script lang="ts">
-import { Folder, Mic, MonitorCheck, MonitorX, X } from "@lucide/svelte";
+import { Folder, Mic, MonitorCheck, MonitorX } from "@lucide/svelte";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
+import { pop } from "svelte-spa-router";
 import Button from "./Button.svelte";
 import DownloadProgressBar from "./DownloadProgressBar.svelte";
+import PageHeader from "./PageHeader.svelte";
 import ServerControls from "./ServerControls.svelte";
+import { servers } from "./stores/servers.svelte";
+import { session } from "./stores/session.svelte";
 import type {
   DownloadProgress,
   HfGgufFile,
   HfModelDetail,
   HfModelSummary,
   LlmDownloadProgress,
-  ServerStatus,
   SttSettings,
-  SttStatus,
 } from "./types";
 
-let {
-  onClose,
-  onSaved,
-  isRecording = false,
-  isTranscribing = false,
-  sttStatus,
-  onServerRefresh,
-  llmStatus,
-  onLlmServerRefresh,
-}: {
-  onClose: () => void;
-  onSaved: () => void;
-  isRecording?: boolean;
-  isTranscribing?: boolean;
-  sttStatus: SttStatus;
-  onServerRefresh: (opts?: {
-    attemptStart?: boolean;
-  }) => Promise<SttSettings | null>;
-  llmStatus: ServerStatus;
-  onLlmServerRefresh: (opts?: {
-    attemptStart?: boolean;
-  }) => Promise<SttSettings | null>;
-} = $props();
+// `pop` invece di una rotta fissa: le impostazioni si aprono da qualsiasi
+// schermata (il bottone dell'indicatore è sempre visibile) e chiudendole si
+// deve tornare da dove si è arrivati, non sempre alla registrazione.
+const close = () => pop();
 
 let settings = $state<SttSettings | null>(null);
 let downloading = $state(false);
@@ -65,7 +48,7 @@ let hfFilesGated = $state(false);
 let hfFiles = $state<HfGgufFile[]>([]);
 let searchDebounce: ReturnType<typeof setTimeout> | undefined;
 
-let locked = $derived(isRecording || isTranscribing);
+let locked = $derived(session.locked);
 
 $effect(() => {
   invoke<SttSettings>("get_stt_settings").then((s) => {
@@ -100,7 +83,7 @@ $effect(() => {
         // verità è sempre il file, stesso motivo per cui get_stt_settings
         // la ricalcola lato Rust invece di fidarsi del valore persistito.
         settings = await invoke<SttSettings>("get_stt_settings");
-        await onLlmServerRefresh({ attemptStart: false });
+        await servers.refreshLlm({ attemptStart: false });
       }
     },
   );
@@ -114,8 +97,8 @@ $effect(() => {
 async function save() {
   if (!settings) return;
   await invoke("save_stt_settings", { settings });
-  onSaved();
-  onClose();
+  await servers.refreshStt();
+  close();
 }
 
 // ── Server STT / LLM ──────────────────────────────────────────────────────────
@@ -127,7 +110,7 @@ async function runStt(cmd: string, opts?: { attemptStart?: boolean }) {
   sttError = null;
   try {
     await invoke(cmd);
-    await onServerRefresh(opts);
+    await servers.refreshStt(opts);
   } catch (e) {
     sttError = String(e);
   } finally {
@@ -140,7 +123,7 @@ async function runLlm(cmd: string) {
   llmError = null;
   try {
     await invoke(cmd);
-    await onLlmServerRefresh({ attemptStart: false });
+    await servers.refreshLlm({ attemptStart: false });
   } catch (e) {
     llmError = String(e);
   } finally {
@@ -151,8 +134,8 @@ async function runLlm(cmd: string) {
 async function handleDeleteModel() {
   await runStt("delete_local_model");
   if (!sttError) {
-    onSaved();
-    onClose();
+    await servers.refreshStt();
+    close();
   }
 }
 
@@ -225,7 +208,7 @@ async function selectModel(repo: string, file: HfGgufFile) {
   // Il nuovo modello non è ancora sul disco: App deve saperlo, altrimenti il
   // CTA "Avvia il server LLM" del dettaglio resta abilitato su un modello
   // mancante.
-  await onLlmServerRefresh({ attemptStart: false });
+  await servers.refreshLlm({ attemptStart: false });
 }
 
 async function startLlmDownload() {
@@ -293,27 +276,20 @@ async function startDownload() {
   </div>
 {/snippet}
 
-{#if settings}
-  <div
-    class="fixed inset-0 z-[100] flex items-center justify-center bg-black/50"
-    role="presentation"
-    onclick={onClose}
-  >
-    <div
-      class="flex max-h-[88vh] w-[min(1400px,92vw)] flex-col gap-5 rounded-2xl bg-brand-darker p-6 text-brand-cream shadow-[0_20px_60px_rgba(0,0,0,0.5)]"
-      role="presentation"
-      onclick={(e) => e.stopPropagation()}
-    >
-      <div class="flex items-center justify-between">
-        <span class="text-base font-bold">Impostazioni</span>
-        <button
-          class="text-base leading-none text-brand-cream opacity-40 transition-opacity hover:opacity-100 cursor-pointer"
-          onclick={onClose}><X size={20} /></button
-        >
-      </div>
+{#snippet actions()}
+  <Button variant="primary" class="px-4 py-1.5" onclick={save}>Salva</Button>
+{/snippet}
 
+<div class="flex h-full w-full flex-col">
+  <PageHeader title="Impostazioni" onBack={close} actions={settings ? actions : undefined} />
+
+  <div class="flex-1 overflow-y-auto px-6 pt-5 pb-18 text-brand-cream">
+    {#if settings}
+      <!-- Le due colonne (core e LLM) si allargano con la finestra fino a un
+           tetto: oltre, si stirerebbero lasciando una voragine in mezzo. Una
+           terza colonna non c'è, i gruppi sono due. -->
       <div
-        class="grid min-h-0 grid-cols-1 gap-x-8 gap-y-5 overflow-y-auto pr-1 lg:grid-cols-2 lg:items-start"
+        class="mx-auto grid w-full max-w-400 grid-cols-1 gap-x-8 gap-y-5 md:grid-cols-2 md:items-start"
       >
       <div class="flex flex-col gap-5">
         <div class="flex flex-col gap-3">
@@ -420,7 +396,7 @@ async function startDownload() {
 
         <ServerControls
           title="Server STT"
-          status={sttStatus}
+          status={servers.sttStatus}
           error={sttError}
           loading={sttLoading}
           {locked}
@@ -556,7 +532,7 @@ async function startDownload() {
 
         <ServerControls
           title="Server LLM"
-          status={llmStatus}
+          status={servers.llmStatus}
           error={llmError}
           hint={settings?.llmReady ? null : "Scarica prima il modello."}
           loading={llmLoading}
@@ -570,8 +546,6 @@ async function startDownload() {
         />
       </div>
       </div>
-
-      <Button variant="primary" class="p-2.5" onclick={save}>Salva</Button>
-    </div>
+    {/if}
   </div>
-{/if}
+</div>

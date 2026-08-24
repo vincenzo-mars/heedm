@@ -107,36 +107,100 @@ Helper di presentazione nello stesso file:
 | `transcriptStatus(entry)` | `RecordingEntry` → `TranscriptStatus` (`transcript` presente → `"transcribed"`, altrimenti `error` presente → `"failed"`, altrimenti `"pending"`) |
 | `transcriptStatusInfo(entry)` | `transcriptStatus(entry)` → `{ label, className }` per il badge a 3 stati di `RecordsList` |
 
+## Store (`src/lib/stores/`)
+
+Moduli `.svelte.ts` singleton: le rune funzionano anche fuori dai componenti, quindi lo stato condiviso non deve più attraversare una catena di props. Ogni store espone un oggetto con getter (`get sttStatus()`, `get all()`, ...) invece delle variabili `$state` nude, perché una variabile esportata direttamente perderebbe la reattività all'import.
+
+Le dipendenze vanno in una sola direzione, `recordings` → `session` → `servers`: mai al contrario, o si formano import circolari.
+
+### `servers.svelte.ts`
+
+Stato dei due server locali: `sttStatus`, `llmStatus` (`ServerStatus`), `modelReady`, `llmReady`.
+
+`refreshStt(opts?: { attemptStart?: boolean }): Promise<SttSettings | null>` è il punto unico di riallineamento fra stato reale (whisper-server + modello sul disco) e stato mostrato in UI: legge `get_stt_settings` (aggiorna `modelReady` da `localReady`) e `check_stt_server`, poi imposta `sttStatus` di conseguenza (`"checking"` mentre gira, poi `"running"` / `"stopped"` / `"starting"`→`"running"` / `"error"`). Con `attemptStart: true` (default) un server non in esecuzione viene avviato, come al mount; con `attemptStart: false` un server fermo resta `"stopped"` invece di essere riavviato, il caso di chi lo ha appena fermato di proposito dalle impostazioni. Ritorna le `SttSettings` lette (o `null` in errore). Chiamata al mount, da `SettingsPanel` dopo ogni azione sul server o sulle impostazioni, e dalla `onContinue` di `Onboarding`; chiunque cambi lo stato del server o del modello la richiama invece di duplicare la logica di check/avvio.
+
+`refreshLlm(opts?)` è il mirror per il server LLM: stessa forma, stessa fonte di verità (`get_stt_settings` + `check_llm_server`), ma **default invertito** — `attemptStart` è `false` qui contro il `true` di STT. Al mount si osserva soltanto: caricare un modello LLM da 1-5GB per una feature che molte sessioni non toccano mai non ha senso, a differenza di whisper che serve sempre. Aggiorna anche `llmReady` (modello LLM presente sul disco, ricalcolato a ogni chiamata): è il gate del bottone "Avvia il server LLM" in `TranscriptNotes`, e resta allineato da sé perché `SettingsPanel` richiama `refreshLlm` dopo download, cambio modello ed eliminazione della cache.
+
+`llmStatus` non si assegna mai direttamente: passa da `setLlmStatus`, che accende un poll di `check_llm_server` ogni 2s finché lo stato è `"loading"`/`"starting"` e lo spegne appena esce. A differenza di whisper il tempo di avvio dell'LLM è imprevedibile e nessun secondo click dell'utente aggiornerebbe altrimenti la UI. Il poll vive nel modulo (`setInterval`), non in un `$effect` di un componente, così non dipende da chi è montato in quel momento.
+
+### `session.svelte.ts`
+
+Sessione di lavoro: `isRecording`, `isTranscribing`, `durationMs`, `transcribeMs`, `error`, più i derivati `locked`, `canRecord`, `recordGateReason`.
+
+`canRecord` (`sttStatus === "running" && modelReady`, letti da `servers`) è il gate lato UI per registrazione e import, e rispecchia `ensure_stt_ready` lato backend (vedi [`architecture.md`](architecture.md)); `recordGateReason` è il messaggio in italiano quando `!canRecord`, che distingue "modello non scaricato" da "server non attivo". Quando `!canRecord`: il bottone REC resta abilitato per lo STOP (non blocca una registrazione già in corso) ma non per l'avvio, "o carica un file" è disabilitato, entrambi mostrano `recordGateReason` come `title`, e lo stesso testo appare come paragrafo sotto i bottoni. `startRecording`/`importFile` ripetono il controllo a runtime, non solo sull'attributo `disabled`, per coerenza con la guardia backend.
+
+`locked` (`isRecording || isTranscribing`) è il lock condiviso: un solo flusso di trascrizione alla volta, e mentre è attivo lista e dettaglio disabilitano **ogni** riga, non solo quella interessata.
+
+`runTranscription(path)` è la primitiva che tiene insieme lock e cronometro; la usano lo stop della registrazione, l'import e il rilancio in `recordings`. I cronometri (`durationMs`, `transcribeMs`) sono timer locali del frontend: il frontend è l'unico a poter avviare i due flussi, quindi conosce già l'istante di inizio e non serve interrogare il backend via IPC.
+
+`importFile(): Promise<boolean>` ritorna `true` solo se un file è stato davvero importato e trascritto, così il chiamante sa se navigare alla lista; `false` copre anche l'annullamento del dialog, che non è un errore.
+
+### `recordings.svelte.ts`
+
+Cache di `list_recordings` (`all`, `loading`) con `load(force = false)` e `byName(name)`. È la fonte unica per lista e dettaglio: senza, il dettaglio raggiunto per URL dovrebbe rifare `list_recordings` per conto suo e le due copie andrebbero riallineate a mano dopo ogni rilancio.
+
+`retryTranscription(folderPath: string): Promise<RecordingEntry[]>` esce subito se `session.locked` (guardia ridondante rispetto al `disabled` dei bottoni), altrimenti chiama `session.runTranscription` su `<folderPath>/recording.wav` ignorando un eventuale errore: l'esito è già persistito su disco da `transcribe_recording` (`transcript.json` o `transcript_error.json`), quindi la `load(true)` finale lo rilegge senza doverlo duplicare in un banner.
+
+## Routing (`src/lib/routes.ts`)
+
+[`svelte-spa-router`](https://github.com/ItalyPaleAle/svelte-spa-router) con hash routing. Sotto Tauri il documento è servito da un protocollo custom e non c'è nessun server che possa riscrivere i path: `#/...` è l'unica forma di URL che regge un reload.
+
+| Rotta | Componente | Note |
+|---|---|---|
+| `/` | `Recorder.svelte` | schermata REC |
+| `/list` | `RecordsList.svelte` | |
+| `/detail/:id` | `RecordingDetail.svelte` | `id` = `entry.name`, cioè il nome della cartella: già univoco nella recordings dir e già filesystem-safe. Passa da `encodeURIComponent` in scrittura e `decodeURIComponent` in lettura |
+| `/settings` | `SettingsPanel.svelte` | |
+| `*` | `Recorder.svelte` | un hash sconosciuto non lascia la finestra vuota |
+
+Navigazione con `push` (`svelte-spa-router`), tranne due casi: le impostazioni chiudono con `pop()`, perché si aprono da qualsiasi schermata e devono tornare da dove si è arrivati; il dettaglio con un `id` inesistente usa `replace("/list")`, per non lasciare in history una rotta morta.
+
+Nessuna route è lazy-loaded: sono quattro componenti già nel bundle, il code splitting non ripagherebbe l'attesa alla prima navigazione.
+
+### Layout delle pagine
+
+Il guscio in `App.svelte` è `flex h-screen flex-col overflow-hidden`, senza padding né centraggio: ogni rotta decide la propria larghezza e lo scroll vive dentro la rotta, così l'header di pagina può restare `sticky`.
+
+Le tre pagine interne hanno la stessa struttura: `PageHeader` in cima, poi un contenitore `flex-1 overflow-y-auto px-6 pt-5 pb-18` a tutta larghezza. Il `pb-18` lascia passare la pillola di stato e il bottone impostazioni, che sono `fixed` in basso.
+
+La larghezza piena vale per lista e impostazioni. Fanno eccezione due punti, per leggibilità: il testo della trascrizione e le note stanno in una colonna `max-w-[72ch]` centrata, e la griglia delle impostazioni si ferma a `max-w-400` (1600px) — oltre, le sue due colonne si stirerebbero lasciando una voragine in mezzo.
+
+### `PageHeader.svelte`
+
+Header comune alle rotte interne: bottone back solo-icona (`ArrowLeft`, `variant="icon"`) sempre nella stessa posizione in alto a sinistra, titolo, e uno snippet `actions` opzionale allineato a destra. `sticky top-0` con `backdrop-blur`, così resta visibile mentre il contenuto scorre sotto.
+
+Prop: `title: string`, `onBack: () => void`, `actions?: Snippet`.
+
+Il bottone "vai alla lista" **non** sta qui: vive in `Recorder.svelte`, `fixed` in alto a destra. Nelle pagine interne si sovrapporrebbe alle azioni dell'header.
+
 ## Componenti Svelte
 
-Svelte 5 con le rune (`$state`, `$derived`, `$effect`, `$props`), un componente per file sotto `src/lib/`, nessuna libreria di state management.
+Svelte 5 con le rune (`$state`, `$derived`, `$effect`, `$props`), un componente per file sotto `src/lib/`. Lo stato condiviso sta nelle store qui sopra; le props restano per ciò che è locale a un singolo albero. I componenti-route ricevono dal router solo `params`: tutto il resto lo leggono dalle store.
 
 ### `App.svelte` (root)
 
-Stato: `isRecording`, `durationMs`, `error`, `isTranscribing`, `transcribeMs`, `sttStatus`, `modelReady`, `llmStatus`, `llmReady`, `showSettings`, `view` (`"record" | "list" | "detail"`), `selectedEntry`.
+Guscio dell'app, senza stato proprio: monta `<Router>` e `SttIndicator` (pillola di stato e bottone impostazioni, `fixed` in basso, visibili su ogni rotta).
 
-`refreshLlmState(opts?: { attemptStart?: boolean }): Promise<SttSettings | null>` è il mirror di `refreshSttState` per il server LLM: stessa forma, stessa fonte di verità (`get_stt_settings` + `check_llm_server`), ma **default invertito** — `attemptStart` è `false` qui contro il `true` di STT. Al mount si osserva soltanto: caricare un modello LLM da 1-5GB per una feature che molte sessioni non toccano mai non ha senso, a differenza di whisper che serve sempre. Un secondo `$effect` fa polling di `check_llm_server` ogni 2s finché `llmStatus` è `"loading"`/`"starting"`, perché a differenza di whisper il tempo di avvio (download compreso) è imprevedibile e nessun secondo click dell'utente lo farebbe altrimenti aggiornare. Passata a `SettingsPanel` (`onLlmServerRefresh`) e a `RecordingDetail`→`TranscriptNotes` (`onLlmRefresh`). Aggiorna anche `llmReady` (modello LLM presente sul disco, ricalcolato da `get_stt_settings` a ogni chiamata): è la prop che `TranscriptNotes` usa come gate del bottone "Avvia il server LLM", e resta allineata da sola perché `SettingsPanel` chiama `onLlmServerRefresh` dopo download, cambio modello ed eliminazione della cache.
-
-`canRecord = $derived(sttStatus === "running" && modelReady)` è il gate lato UI per registrazione e import (rispecchia `ensure_stt_ready` lato backend, vedi [`architecture.md`](architecture.md)); `recordGateReason` (`$derived.by`) è il messaggio in italiano da mostrare quando `!canRecord`, che distingue "modello non scaricato" da "server non attivo". Quando `!canRecord`: il bottone REC resta abilitato per lo STOP (non blocca una registrazione già in corso) ma non per l'avvio, il bottone "o carica un file" è disabilitato, entrambi mostrano `recordGateReason` come `title`, e lo stesso testo appare come paragrafo visibile sotto i bottoni. `handleRecord`/`handleImport` ripetono il controllo su `canRecord` anche a runtime (non solo sull'attributo `disabled`), per coerenza con la guardia backend.
-
-`refreshSttState(opts?: { attemptStart?: boolean }): Promise<SttSettings | null>` è il punto unico di riallineamento fra stato reale (whisper-server + modello sul disco) e stato mostrato in UI: legge `get_stt_settings` (aggiorna `modelReady` da `localReady`) e `check_stt_server`, poi imposta `sttStatus` di conseguenza (`"checking"` mentre gira, poi `"running"` / `"stopped"` / `"starting"`→`"running"` / `"error"`). Con `attemptStart: true` (default) un server non in esecuzione viene avviato, come oggi al mount; con `attemptStart: false` un server fermo resta `"stopped"` invece di essere riavviato automaticamente, il caso di chi lo ha appena fermato di proposito dalle impostazioni. Ritorna le `SttSettings` lette (o `null` in errore). È chiamata al mount, da `onSaved` di `SettingsPanel` e dalla `onContinue` di `Onboarding`; chiunque cambi lo stato del server o del modello (impostazioni, rilancio trascrizione) la richiama invece di duplicare la logica di check/avvio. Passata ai figli come callback: a `SettingsPanel` direttamente come `onServerRefresh` (richiamata dopo ogni azione sul server) e via `onSaved` (dopo un salvataggio); a `Onboarding` direttamente come `onContinue`.
-
-Rendering condizionato da `modelReady`, valutato allo stesso modo indipendentemente dal motivo per cui il modello manca (primo avvio mai configurato, o modello eliminato in un secondo momento dalle impostazioni): se `!modelReady` l'intera UI normale è sostituita da `Onboarding` a schermo intero, nessun ramo separato per i due casi.
+Rendering condizionato da `servers.modelReady`, valutato allo stesso modo indipendentemente dal motivo per cui il modello manca (primo avvio mai configurato, o modello eliminato in un secondo momento dalle impostazioni): se `!modelReady` l'intera UI normale — router compreso — è sostituita da `Onboarding` a schermo intero, nessun ramo separato per i due casi.
 
 Flusso:
-1. Mount → `refreshSttState()`; se `!modelReady` si mostra `Onboarding` al posto della UI normale
-2. `Onboarding` scarica il modello e a fine download invoca `onContinue` → `refreshSttState()` → `modelReady` torna `true` → si torna automaticamente alla UI normale
-3. REC → `start_recording`; il cronometro è un timer locale del frontend (stesso pattern di `transcribeMs`), nessun polling IPC
-4. STOP → `stop_recording` → `transcribe_recording`
-5. "o carica un file" (solo a riposo) → `import_audio_file` → `transcribe_recording` → vista lista
-6. Bottone lista in alto a destra → `RecordsList` → click su una entry → `RecordingDetail`
-7. Rilancio trascrizione (da `RecordsList` o `RecordingDetail`) → `retryTranscription(folderPath)`
+1. Mount → `servers.refreshStt()` + `servers.refreshLlm()`; se `!modelReady` si mostra `Onboarding` al posto della UI normale
+2. `Onboarding` scarica il modello e a fine download invoca `onContinue` → `refreshStt()` → `modelReady` torna `true` → si torna automaticamente alla UI normale
+3. REC → `session.startRecording()` → `start_recording`
+4. STOP → `session.stopRecording()` → `stop_recording` → `transcribe_recording`
+5. "o carica un file" (solo a riposo) → `session.importFile()` → se ritorna `true`, `push("/list")`
+6. Bottone lista in alto a destra → `push("/list")` → click su una entry → `push("/detail/<name>")`
+7. Rilancio trascrizione (da `RecordsList` o `RecordingDetail`) → `recordings.retryTranscription(folderPath)`
 
-`retryTranscription(folderPath: string): Promise<RecordingEntry[]>` è la callback passata a `RecordsList` e `RecordingDetail` come `onRetry`. Riusa lo stesso `isTranscribing` del flusso REC/import (nessun secondo flag): se `isRecording || isTranscribing` è già vero esce subito senza fare nulla (guardia ridondante rispetto al `disabled` dei bottoni, stesso pattern di `handleImport`/`handleRecord`). Altrimenti mette `isTranscribing = true`, chiama `transcribe_recording` su `<folderPath>/recording.wav` ignorando un eventuale errore (già persistito su disco da `transcribe_recording` come `transcript.json` o `transcript_error.json`, non serve duplicarlo nel banner `error` della vista REC), poi in ogni caso rimette `isTranscribing = false`. A quel punto richiama `list_recordings` (unica fonte di verità, nessun refresh locale scollegato dal backend) e, se `selectedEntry` è impostato, lo riallinea con l'entry corrispondente nell'array appena letto — così `RecordingDetail`, se aperto sul record rilanciato, non resta con una prop stale. Ritorna l'array fresco: `RecordsList` lo usa per aggiornare la propria lista, `RecordingDetail` lo ignora (il suo aggiornamento passa da `selectedEntry`).
+Il riallineamento manuale dell'entry aperta dopo un rilancio non serve più: lista e dettaglio derivano entrambi da `recordings`, quindi la `load(true)` finale li aggiorna insieme.
+
+### `Recorder.svelte`
+
+La schermata REC, estratta da `App.svelte` quando è diventata una rotta. Bottone REC/STOP, "o carica un file", cronometro, stato della trascrizione ed eventuale errore: tutto letto da `session`, nessuna prop.
 
 ### `SttIndicator.svelte`
 
-Due elementi flottanti in basso: il pulsante impostazioni a destra e la pillola di stato a sinistra.
+Due elementi flottanti in basso, presenti su ogni rotta: il pulsante impostazioni a destra (naviga a `/settings`) e la pillola di stato a sinistra. Unica prop: `status: SttStatus`.
 
 | Stato | Dot | Label |
 |---|---|---|
@@ -153,27 +217,19 @@ Il colore semantico vive solo sul dot: il testo resta `brand-cream` per uniformi
 
 View a schermo intero (non un modal), mostrata da `App.svelte` al posto della UI normale quando `!modelReady`. Logo (`public/icon.png`), titolo e sottotitolo fissi, poi tre stati in sequenza: CTA "Scarica il modello" → progress bar sull'evento `download-progress` (stesso comando `download_local_model` e stesso evento di `SettingsPanel`) con il messaggio "prenditi un caffè" visibile solo mentre `downloading` è vero → messaggio finale e bottone "Continua". Nessun bottone "salta": l'unica uscita è un download riuscito.
 
-Prop: `onContinue: () => void`, chiamata dal bottone "Continua"; `App.svelte` la collega a `refreshSttState()` così `modelReady` si aggiorna e il rendering torna da solo alla UI normale, senza che `Onboarding` gestisca la propria visibilità.
+Prop: `onContinue: () => void`, chiamata dal bottone "Continua"; `App.svelte` la collega a `servers.refreshStt()` così `modelReady` si aggiorna e il rendering torna da solo alla UI normale, senza che `Onboarding` gestisca la propria visibilità.
 
 ### `SettingsPanel.svelte`
 
-Modal con permessi OS, download dei modelli, controllo server STT/LLM e percorsi. Contenitore `w-[min(1400px,92vw)] max-h-[88vh]` con il corpo a griglia scrollabile (`grid-cols-1 lg:grid-cols-2`, un solo scroll esterno): header e bottone Salva restano fissi fuori dalla griglia. Colonna sinistra (core, sempre rilevante): Permessi, Modello Whisper, Server STT, Cartella registrazioni. Colonna destra (opzionale, additiva): Modello LLM, Server LLM — stessa distinzione già in [`architecture.md`](architecture.md) fra STT (sempre necessario) e LLM (riassunto/chat, lazy). Sotto il breakpoint `lg` (1024px) le due colonne si impilano in una sola, identico al layout precedente. La sezione permessi viene per prima perché blocca tutto il resto.
+Rotta `/settings` con permessi OS, download dei modelli, controllo server STT/LLM e percorsi. Corpo a griglia (`grid-cols-1 md:grid-cols-2`, tetto `max-w-400`); il bottone Salva sta nelle `actions` del `PageHeader`, non in fondo alla pagina. Colonna sinistra (core, sempre rilevante): Permessi, Modello Whisper, Server STT, Cartella registrazioni. Colonna destra (opzionale, additiva): Modello LLM, Server LLM — stessa distinzione già in [`architecture.md`](architecture.md) fra STT (sempre necessario) e LLM (riassunto/chat, lazy). Sotto il breakpoint `md` (768px) le due colonne si impilano in una sola. La sezione permessi viene per prima perché blocca tutto il resto.
 
-Prop:
-- `onClose: () => void` — callback per chiudere il modal
-- `onSaved: () => void` — callback invocata dopo salvataggio delle impostazioni e dopo eliminazione del modello (chiude il modal automaticamente)
-- `isRecording?: boolean` — disabilita i bottoni del server se in corso una registrazione
-- `isTranscribing?: boolean` — disabilita i bottoni del server se in corso una trascrizione
-- `sttStatus: SttStatus` — stato del server, passato da `App.svelte` (fonte di verità unica, non duplicato localmente)
-- `onServerRefresh: (opts?: { attemptStart?: boolean }) => Promise<SttSettings | null>` — `refreshSttState` di `App.svelte`, passata by reference: ogni azione sul server la richiama per riallineare lo stato condiviso (gate REC, `SttIndicator`) invece di tenere una copia locale che si disallineerebbe alla chiusura del modal con la X
-- `llmStatus: ServerStatus` — stato del server LLM, passato da `App.svelte`
-- `onLlmServerRefresh: (opts?: { attemptStart?: boolean }) => Promise<SttSettings | null>` — `refreshLlmState` di `App.svelte`, stesso ruolo di `onServerRefresh` ma per l'LLM
+Nessuna prop: era un modal con otto props passate da `App.svelte`, ora legge `servers` e `session` direttamente. Back e salvataggio chiudono con `pop()`, non con una callback del genitore.
 
 Le sezioni server STT e LLM sono due istanze di `ServerControls.svelte` (vedi sotto). Tutti i comandi server passano da due helper interni (`runStt(cmd, opts?)` / `runLlm(cmd)`: busy flag, `invoke`, refresh dello stato in `App.svelte`, errore nella card di stato); lato STT:
-- **Avvia** → `start_stt_server`, poi `onServerRefresh()`
-- **Riavvia** → `restart_stt_server`, poi `onServerRefresh()`
-- **Spegni** → `stop_stt_server`, poi `onServerRefresh({ attemptStart: false })` (NON riavvia automaticamente)
-- **Elimina modello** → `delete_local_model`, poi `onServerRefresh()` (aggiorna `modelReady` a `false`, che fa ricomparire `Onboarding` in `App.svelte`) e, se non c'è errore, `onSaved`/`onClose` per chiudere il modal
+- **Avvia** → `start_stt_server`, poi `servers.refreshStt()`
+- **Riavvia** → `restart_stt_server`, poi `servers.refreshStt()`
+- **Spegni** → `stop_stt_server`, poi `servers.refreshStt({ attemptStart: false })` (NON riavvia automaticamente)
+- **Elimina modello** → `delete_local_model`, poi `servers.refreshStt()` (aggiorna `modelReady` a `false`, che fa ricomparire `Onboarding` al posto del router) e, se non c'è errore, `pop()`
 
 Sezione "Modello LLM": campo di ricerca con debounce (~400ms, query di default "instruct" a campo vuoto). La prima fetch è lazy: parte al primo focus del campo, non all'apertura del pannello (chi apre le impostazioni per i permessi non costa una chiamata a Hugging Face). Poi → `search_hf_models` → lista repo (nome, licenza dai tag, download) → click espande e chiama `get_hf_model_files` (i file GGUF divisi in shard, `<nome>-NNNNN-of-NNNNN.gguf`, sono filtrati via lato Rust: fuori scope, vedi `DEVLOG.md`) → lista file `.gguf` con dimensione reale e un badge "consigliato/pesante per la tua RAM" (euristica su `get_system_memory_gb`, mai bloccante) → click su un file chiama `set_llm_model` (con la size) e aggiorna `settings` in locale (`llmReady` torna `false` finché il download non completa). Repo `gated` mostrato ma non selezionabile (lucchetto + messaggio, nessun flusso di login HF).
 
@@ -186,19 +242,19 @@ Subito sotto il box "Selezionato" c'è il bottone di download (mirror di quello 
 | selezionato, non ancora scaricato | "Scarica modello (X GB)" |
 | già scaricato (`llmReady`) | "Scarica di nuovo (X GB)" |
 
-Il download (`download_llm_model`) ascolta l'evento dedicato `llm-download-progress`; a `step: "done"` ricarica `settings` da `get_stt_settings` (non setta `llmReady` in ottimismo: la verità è il file su disco) e richiama `onLlmServerRefresh`.
+Il download (`download_llm_model`) ascolta l'evento dedicato `llm-download-progress`; a `step: "done"` ricarica `settings` da `get_stt_settings` (non setta `llmReady` in ottimismo: la verità è il file su disco) e richiama `servers.refreshLlm`.
 
-Sezione "Server LLM" sotto: seconda istanza di `ServerControls` con `llmStatus`/i comandi `*_llm_server`; Avvia/Riavvia sono `disabled` anche quando `!settings.llmReady` (prop `canStart`, con il messaggio "Scarica prima il modello." come `hint` nella card di stato), e il bottone danger è "Elimina modelli scaricati" (`clear_llm_cache`, cancella sia i modelli scaricati da heedm sia la vecchia cache nativa di llama-server). La scelta di un modello dalla ricerca HF (`selectModel`) chiama anche `onLlmServerRefresh({ attemptStart: false })`: il nuovo modello non è sul disco, e senza quel giro `App.svelte` resterebbe con un `llmReady` stale che tiene abilitato il CTA del dettaglio trascrizione. `sttLoading`/`sttError` e `llmLoading`/`llmError` sono stati locali separati per sezione: un errore sul server LLM non disabilita i controlli whisper e viceversa. I tre box "Percorso"/"Selezionato" sono un unico snippet Svelte locale (`pathBox`).
+Sezione "Server LLM" sotto: seconda istanza di `ServerControls` con `llmStatus`/i comandi `*_llm_server`; Avvia/Riavvia sono `disabled` anche quando `!settings.llmReady` (prop `canStart`, con il messaggio "Scarica prima il modello." come `hint` nella card di stato), e il bottone danger è "Elimina modelli scaricati" (`clear_llm_cache`, cancella sia i modelli scaricati da heedm sia la vecchia cache nativa di llama-server). La scelta di un modello dalla ricerca HF (`selectModel`) chiama anche `servers.refreshLlm({ attemptStart: false })`: il nuovo modello non è sul disco, e senza quel giro la store resterebbe con un `llmReady` stale che tiene abilitato il CTA del dettaglio trascrizione. `sttLoading`/`sttError` e `llmLoading`/`llmError` sono stati locali separati per sezione: un errore sul server LLM non disabilita i controlli whisper e viceversa. I tre box "Percorso"/"Selezionato" sono un unico snippet Svelte locale (`pathBox`).
 
 ### `RecordsList.svelte`, `RecordingDetail.svelte`, `TranscriptView.svelte`
 
 Lista delle registrazioni con badge a 3 stati ("trascritto"/"in attesa"/"fallito", da `transcriptStatusInfo`) e tempo di trascrizione; dettaglio con reveal della cartella; rendering della trascrizione raggruppata per speaker con barra colorata a sinistra.
 
-Prop condivise da `RecordsList` e `RecordingDetail`: `isRecording: boolean`, `isTranscribing: boolean` (lock globale passato da `App.svelte`, combinati in un `locked = $derived(...)` locale) e `onRetry: (folderPath: string) => Promise<RecordingEntry[]>` (`retryTranscription` di `App.svelte`).
+Entrambe sono rotte e non ricevono props dal genitore: leggono le registrazioni da `recordings` e il lock da `session.locked`. `RecordingDetail` riceve solo `params.id` dal router.
 
-In `RecordsList` ogni riga non è più un unico `<button>`: è un `<div>` che contiene un `<button>` (nome + badge, disabilitato quando `locked`, chiama `onSelect`) e un `Button` "Rilancia" separato (nesting di bottoni non è HTML valido). Il bottone "Rilancia" compare su ogni riga, non solo su quelle fallite: il rilancio è pensato anche per un record trascritto "che non convince". Al click chiama `onRetry(entry.folder_path)` e sostituisce `entries` con l'array ritornato.
+In `RecordsList` ogni riga non è un unico `<button>`: è un `<div>` che contiene un `<button>` (nome + badge, disabilitato quando `session.locked`, naviga a `/detail/<name>`) e un `Button` "Rilancia" separato (nesting di bottoni non è HTML valido). Il bottone "Rilancia" compare su ogni riga, non solo su quelle fallite: il rilancio è pensato anche per un record trascritto "che non convince".
 
-In `RecordingDetail` un bottone "Rilancia trascrizione" nell'header (stesso stile di "Apri cartella") chiama `onRetry(entry.folder_path)` ignorando il valore di ritorno: l'aggiornamento arriva da `App.svelte` che riassegna `selectedEntry`, prop che si propaga qui da sola. Il corpo mostra `TranscriptView` se `entry.transcript` è presente, altrimenti il messaggio d'errore in rosso se `entry.error` è presente, altrimenti "Trascrizione non ancora disponibile." Sotto la card trascrizione, `<TranscriptNotes {entry} {llmStatus} {llmReady} {onLlmRefresh} />` (prop aggiuntive di `RecordingDetail`, passate da `App.svelte`).
+In `RecordingDetail` un bottone "Rilancia trascrizione" nell'header (stesso stile di "Apri cartella") chiama `recordings.retryTranscription`: l'aggiornamento torna da solo, perché `entry` è un `$derived` su `recordings.byName(id)`. Finché `recordings.load()` non ha risposto il componente mostra "Caricamento...", non "non trovata": arrivando qui direttamente dall'URL la store è ancora vuota e l'assenza non significherebbe nulla. A `load()` conclusa, un `id` senza riscontro (registrazione cancellata) fa `replace("/list")`. Il corpo mostra `TranscriptView` se `entry.transcript` è presente, altrimenti il messaggio d'errore in rosso se `entry.error` è presente, altrimenti "Trascrizione non ancora disponibile." Sotto la card trascrizione, `TranscriptNotes` riceve `entry` e lo stato LLM letto da `servers`.
 
 ### `TranscriptNotes.svelte`, `TranscriptChat.svelte`, `src/lib/llm.ts`
 
