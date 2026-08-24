@@ -4,6 +4,7 @@
 //! rilasciato prima di ogni `.await`, mai kill-by-porta) che una copia-incolla
 //! avrebbe finito per rompere in uno dei due punti.
 
+use std::path::Path;
 use std::sync::Mutex;
 
 pub(crate) async fn port_is_open(port: u16) -> bool {
@@ -12,14 +13,53 @@ pub(crate) async fn port_is_open(port: u16) -> bool {
         .is_ok()
 }
 
+/// Poll a 250ms invece che a 1s: il server apre la porta in frazioni di
+/// secondo dopo il load, e la granularità grossa aggiungeva fino a 1s di
+/// latenza percepita sull'avvio.
 pub(crate) async fn wait_for_port(port: u16, timeout_secs: u64) -> Result<(), String> {
-    for _ in 0..timeout_secs {
-        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+    for _ in 0..timeout_secs * 4 {
+        tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
         if port_is_open(port).await {
             return Ok(());
         }
     }
     Err(format!("Server locale non pronto dopo {timeout_secs}s"))
+}
+
+/// Thread da passare ai server locali: tutti i core meno due (uno per l'app,
+/// uno per l'OS), mai sotto 1.
+pub(crate) fn default_threads() -> usize {
+    std::thread::available_parallelism()
+        .map(|n| n.get().saturating_sub(2).max(1))
+        .unwrap_or(4)
+}
+
+/// Spawn di un server locale + registrazione del child nello slot tracciato,
+/// così `stop_tracked_server` e il cleanup alla chiusura possono terminarlo.
+pub(crate) fn spawn_tracked(
+    bin: &Path,
+    args: &[&str],
+    slot: &Mutex<Option<tokio::process::Child>>,
+) -> Result<(), String> {
+    let child = tokio::process::Command::new(bin)
+        .args(args)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    match slot.lock() {
+        Ok(mut guard) => {
+            *guard = Some(child);
+            Ok(())
+        }
+        Err(e) => Err(format!("Stato del server corrotto: {e}")),
+    }
+}
+
+/// Kill best-effort del child tracciato, usato alla chiusura dell'app: niente
+/// `wait()` (il processo muore da solo, l'app sta uscendo).
+pub(crate) fn kill_tracked(slot: &Mutex<Option<tokio::process::Child>>) {
+    if let Some(mut child) = slot.lock().ok().and_then(|mut guard| guard.take()) {
+        let _ = child.start_kill();
+    }
 }
 
 /// Secondi di attesa dopo il kill prima di arrendersi: il processo può tenere

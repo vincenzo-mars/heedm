@@ -1,6 +1,6 @@
 use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
-    SampleFormat, Stream, StreamConfig,
+    FromSample, Sample, SampleFormat, SizedSample, Stream, StreamConfig,
 };
 use std::sync::{Arc, Mutex};
 
@@ -8,6 +8,31 @@ pub struct MicInfo {
     pub stream: Stream,
     pub sample_rate: u32,
     pub channels: u16,
+}
+
+/// Un solo builder per tutti i formati campione: la conversione a f32 la fa
+/// dasp (via `cpal::FromSample`), che gestisce correttamente anche l'offset
+/// dei formati unsigned.
+fn build_stream<T>(
+    device: &cpal::Device,
+    config: &StreamConfig,
+    samples: Arc<Mutex<Vec<f32>>>,
+) -> Result<Stream, cpal::BuildStreamError>
+where
+    T: SizedSample,
+    f32: FromSample<T>,
+{
+    device.build_input_stream(
+        config,
+        move |data: &[T], _| {
+            samples
+                .lock()
+                .unwrap()
+                .extend(data.iter().map(|&s| f32::from_sample(s)));
+        },
+        |e| eprintln!("mic stream error: {e}"),
+        None,
+    )
 }
 
 pub fn start_mic_capture(samples: Arc<Mutex<Vec<f32>>>) -> Result<MicInfo, String> {
@@ -25,46 +50,10 @@ pub fn start_mic_capture(samples: Arc<Mutex<Vec<f32>>>) -> Result<MicInfo, Strin
     let sample_format = config.sample_format();
     let stream_config: StreamConfig = config.into();
 
-    let err_fn = |e| eprintln!("mic stream error: {e}");
-
     let stream = match sample_format {
-        SampleFormat::F32 => {
-            let buf = samples.clone();
-            device.build_input_stream(
-                &stream_config,
-                move |data: &[f32], _| buf.lock().unwrap().extend_from_slice(data),
-                err_fn,
-                None,
-            )
-        }
-        SampleFormat::I16 => {
-            let buf = samples.clone();
-            device.build_input_stream(
-                &stream_config,
-                move |data: &[i16], _| {
-                    let mut g = buf.lock().unwrap();
-                    for &s in data {
-                        g.push(s as f32 / i16::MAX as f32);
-                    }
-                },
-                err_fn,
-                None,
-            )
-        }
-        SampleFormat::U16 => {
-            let buf = samples.clone();
-            device.build_input_stream(
-                &stream_config,
-                move |data: &[u16], _| {
-                    let mut g = buf.lock().unwrap();
-                    for &s in data {
-                        g.push((s as f32 / u16::MAX as f32) * 2.0 - 1.0);
-                    }
-                },
-                err_fn,
-                None,
-            )
-        }
+        SampleFormat::F32 => build_stream::<f32>(&device, &stream_config, samples),
+        SampleFormat::I16 => build_stream::<i16>(&device, &stream_config, samples),
+        SampleFormat::U16 => build_stream::<u16>(&device, &stream_config, samples),
         _ => return Err(format!("Unsupported mic sample format: {sample_format:?}")),
     }
     .map_err(|e| e.to_string())?;

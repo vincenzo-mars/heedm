@@ -3,9 +3,13 @@ import { Folder, Mic, MonitorCheck, MonitorX, X } from "@lucide/svelte";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
+import Button from "./Button.svelte";
+import DownloadProgressBar from "./DownloadProgressBar.svelte";
+import ServerControls from "./ServerControls.svelte";
 import type {
   DownloadProgress,
   HfGgufFile,
+  HfModelDetail,
   HfModelSummary,
   LlmDownloadProgress,
   ServerStatus,
@@ -24,7 +28,7 @@ let {
   onLlmServerRefresh,
 }: {
   onClose: () => void;
-  onSaved: (s: SttSettings) => void;
+  onSaved: () => void;
   isRecording?: boolean;
   isTranscribing?: boolean;
   sttStatus: SttStatus;
@@ -53,12 +57,15 @@ let llmError = $state<string | null>(null);
 let systemRamGb = $state<number | null>(null);
 let hfQuery = $state("");
 let hfSearching = $state(false);
+let hfSearched = $state(false);
 let hfResults = $state<HfModelSummary[]>([]);
 let expandedRepo = $state<string | null>(null);
 let hfFilesLoading = $state(false);
 let hfFilesGated = $state(false);
 let hfFiles = $state<HfGgufFile[]>([]);
 let searchDebounce: ReturnType<typeof setTimeout> | undefined;
+
+let locked = $derived(isRecording || isTranscribing);
 
 $effect(() => {
   invoke<SttSettings>("get_stt_settings").then((s) => {
@@ -74,7 +81,6 @@ $effect(() => {
   invoke<number>("get_system_memory_gb").then((gb) => {
     systemRamGb = gb;
   });
-  runSearch("instruct");
 
   const unlisten = listen<DownloadProgress>("download-progress", (e) => {
     dlProgress = e.payload;
@@ -107,18 +113,21 @@ $effect(() => {
 
 async function save() {
   if (!settings) return;
-  const updated: SttSettings = { ...settings, configured: true };
-  await invoke("save_stt_settings", { settings: updated });
-  onSaved(updated);
+  await invoke("save_stt_settings", { settings });
+  onSaved();
   onClose();
 }
 
-async function handleStartServer() {
+// ── Server STT / LLM ──────────────────────────────────────────────────────────
+// Tutti i comandi server hanno la stessa forma: busy flag, invoke, refresh
+// dello stato in App, errore mostrato nel box di stato.
+
+async function runStt(cmd: string, opts?: { attemptStart?: boolean }) {
   sttLoading = true;
   sttError = null;
   try {
-    await invoke("start_stt_server");
-    await onServerRefresh();
+    await invoke(cmd);
+    await onServerRefresh(opts);
   } catch (e) {
     sttError = String(e);
   } finally {
@@ -126,103 +135,35 @@ async function handleStartServer() {
   }
 }
 
-async function handleRestartServer() {
-  sttLoading = true;
-  sttError = null;
+async function runLlm(cmd: string) {
+  llmLoading = true;
+  llmError = null;
   try {
-    await invoke("restart_stt_server");
-    await onServerRefresh();
+    await invoke(cmd);
+    await onLlmServerRefresh({ attemptStart: false });
   } catch (e) {
-    sttError = String(e);
+    llmError = String(e);
   } finally {
-    sttLoading = false;
-  }
-}
-
-async function handleStopServer() {
-  sttLoading = true;
-  sttError = null;
-  try {
-    await invoke("stop_stt_server");
-    await onServerRefresh({ attemptStart: false });
-  } catch (e) {
-    sttError = String(e);
-  } finally {
-    sttLoading = false;
+    llmLoading = false;
   }
 }
 
 async function handleDeleteModel() {
-  if (!settings) return;
-  sttLoading = true;
-  sttError = null;
-  try {
-    await invoke("delete_local_model");
-    await onServerRefresh();
-    onSaved(settings);
+  await runStt("delete_local_model");
+  if (!sttError) {
+    onSaved();
     onClose();
-  } catch (e) {
-    sttError = String(e);
-  } finally {
-    sttLoading = false;
-  }
-}
-
-// ── Server LLM ────────────────────────────────────────────────────────────────
-
-async function handleStartLlmServer() {
-  llmLoading = true;
-  llmError = null;
-  try {
-    await invoke("start_llm_server");
-    await onLlmServerRefresh({ attemptStart: false });
-  } catch (e) {
-    llmError = String(e);
-  } finally {
-    llmLoading = false;
-  }
-}
-
-async function handleRestartLlmServer() {
-  llmLoading = true;
-  llmError = null;
-  try {
-    await invoke("restart_llm_server");
-    await onLlmServerRefresh({ attemptStart: false });
-  } catch (e) {
-    llmError = String(e);
-  } finally {
-    llmLoading = false;
-  }
-}
-
-async function handleStopLlmServer() {
-  llmLoading = true;
-  llmError = null;
-  try {
-    await invoke("stop_llm_server");
-    await onLlmServerRefresh({ attemptStart: false });
-  } catch (e) {
-    llmError = String(e);
-  } finally {
-    llmLoading = false;
-  }
-}
-
-async function handleClearLlmCache() {
-  llmLoading = true;
-  llmError = null;
-  try {
-    await invoke("clear_llm_cache");
-    await onLlmServerRefresh({ attemptStart: false });
-  } catch (e) {
-    llmError = String(e);
-  } finally {
-    llmLoading = false;
   }
 }
 
 // ── Ricerca modelli Hugging Face ────────────────────────────────────────────────
+
+// Lazy: la prima fetch parte al primo focus del campo, non all'apertura del
+// pannello — chi apre le impostazioni per i permessi non deve costare una
+// chiamata a Hugging Face.
+function initSearch() {
+  if (!hfSearched && !hfSearching) runSearch("instruct");
+}
 
 function scheduleSearch() {
   clearTimeout(searchDebounce);
@@ -234,6 +175,7 @@ function scheduleSearch() {
 
 async function runSearch(query: string) {
   hfSearching = true;
+  hfSearched = true;
   llmError = null;
   try {
     hfResults = await invoke<HfModelSummary[]>("search_hf_models", { query });
@@ -254,11 +196,9 @@ async function toggleRepo(id: string) {
   hfFilesGated = false;
   hfFilesLoading = true;
   try {
-    const detail = await invoke<{
-      gated: boolean;
-      context_length: number | null;
-      files: HfGgufFile[];
-    }>("get_hf_model_files", { repoId: id });
+    const detail = await invoke<HfModelDetail>("get_hf_model_files", {
+      repoId: id,
+    });
     hfFilesGated = detail.gated;
     hfFiles = [...detail.files].sort((a, b) => a.size_bytes - b.size_bytes);
   } catch (e) {
@@ -313,10 +253,6 @@ function ramBadge(
   return { label: "Pesante per la tua RAM", className: "text-red-400" };
 }
 
-function revealRecordings() {
-  if (recordingsDir) revealItemInDir(recordingsDir);
-}
-
 async function refreshScreenRecordingStatus() {
   screenRecordingGranted = await invoke<boolean>(
     "check_screen_recording_permission",
@@ -326,6 +262,7 @@ async function refreshScreenRecordingStatus() {
 function openPermissionSettings(pane: "microphone" | "screen-recording") {
   invoke("open_permission_settings", { pane });
 }
+
 async function startDownload() {
   downloading = true;
   dlProgress = null;
@@ -337,6 +274,20 @@ async function startDownload() {
   }
 }
 </script>
+
+{#snippet pathBox(label: string, value: string)}
+  <div
+    class="flex flex-col gap-1 rounded-lg border border-brand-cream/10 bg-brand-dark/50 px-2.5 py-2"
+  >
+    <span
+      class="text-[0.62rem] font-semibold tracking-wider text-brand-cream/40 uppercase"
+      >{label}</span
+    >
+    <p class="m-0 font-mono text-[0.72rem] break-all text-brand-cream/70">
+      {value}
+    </p>
+  </div>
+{/snippet}
 
 {#if settings}
   <div
@@ -442,35 +393,16 @@ async function startDownload() {
           {/if}
 
           {#if modelPath}
-            <div
-              class="flex flex-col gap-1 rounded-lg border border-brand-cream/10 bg-brand-dark/50 px-2.5 py-2"
-            >
-              <span
-                class="text-[0.62rem] font-semibold tracking-wider text-brand-cream/40 uppercase"
-                >Percorso</span
-              >
-              <p
-                class="m-0 font-mono text-[0.72rem] break-all text-brand-cream/70"
-              >
-                {modelPath}
-              </p>
-            </div>
+            {@render pathBox("Percorso", modelPath)}
           {/if}
 
           {#if downloading && dlProgress}
-            <div class="flex flex-col gap-1 pt-1">
-              <div class="h-1.5 overflow-hidden rounded-full bg-brand-dark">
-                <div
-                  class="h-full rounded-full bg-brand-lighter transition-[width] duration-300"
-                  style={`width: ${dlProgress.pct}%`}
-                ></div>
-              </div>
-              <span class="text-xs text-brand-cream/55">{dlProgress?.step === "model" ? `Modello ${dlProgress.pct}%` : "Completato"}</span>
-            </div>
+            <DownloadProgressBar progress={dlProgress} />
           {/if}
 
-          <button
-            class="rounded-lg bg-brand-lighter px-4 py-2.5 text-[0.85rem] font-semibold text-brand-cream transition hover:bg-brand-lightest disabled:cursor-not-allowed disabled:bg-brand-light/30"
+          <Button
+            variant="solid"
+            class="px-4 py-2.5 text-[0.85rem]"
             onclick={startDownload}
             disabled={downloading}
           >
@@ -479,65 +411,21 @@ async function startDownload() {
               : settings?.localReady
                 ? "Scarica di nuovo"
                 : "Scarica"}
-          </button>
+          </Button>
         </div>
 
-        <div class="flex flex-col gap-1.5">
-          <span class="text-[0.78rem] font-semibold text-brand-cream"
-            >Server STT</span
-          >
-
-          <div class="flex flex-col gap-2 rounded-lg border border-brand-cream/10 bg-brand-dark/50 px-2.5 py-2">
-            <div class="flex items-center justify-between">
-              <span class="text-[0.8rem] text-brand-cream/70">Stato:</span>
-              <span class={`text-[0.8rem] font-medium ${
-                sttStatus === "running" ? "text-green-400" : "text-brand-cream/60"
-              }`}>
-                {sttStatus === "running" ? "Attivo" : "Fermo"}
-              </span>
-            </div>
-
-            {#if sttError}
-              <p class="m-0 text-[0.75rem] text-red-400 leading-tight">
-                {sttError}
-              </p>
-            {/if}
-          </div>
-
-          <div class="grid grid-cols-2 gap-1.5">
-            <button
-              class="rounded-lg bg-brand-lighter px-3 py-2 text-[0.8rem] font-semibold text-brand-cream transition hover:bg-brand-lightest disabled:cursor-not-allowed disabled:bg-brand-light/30"
-              onclick={handleStartServer}
-              disabled={sttLoading || isRecording || isTranscribing}
-            >
-              {sttLoading ? "..." : "Avvia"}
-            </button>
-
-            <button
-              class="rounded-lg bg-brand-lighter px-3 py-2 text-[0.8rem] font-semibold text-brand-cream transition hover:bg-brand-lightest disabled:cursor-not-allowed disabled:bg-brand-light/30"
-              onclick={handleRestartServer}
-              disabled={sttLoading || isRecording || isTranscribing}
-            >
-              {sttLoading ? "..." : "Riavvia"}
-            </button>
-
-            <button
-              class="rounded-lg bg-brand-lighter px-3 py-2 text-[0.8rem] font-semibold text-brand-cream transition hover:bg-brand-lightest disabled:cursor-not-allowed disabled:bg-brand-light/30"
-              onclick={handleStopServer}
-              disabled={sttLoading || isRecording || isTranscribing}
-            >
-              {sttLoading ? "..." : "Spegni"}
-            </button>
-
-            <button
-              class="rounded-lg bg-red-600 px-3 py-2 text-[0.8rem] font-semibold text-brand-cream transition hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-red-600/30"
-              onclick={handleDeleteModel}
-              disabled={sttLoading || isRecording || isTranscribing}
-            >
-              {sttLoading ? "..." : "Elimina modello"}
-            </button>
-          </div>
-        </div>
+        <ServerControls
+          title="Server STT"
+          status={sttStatus}
+          error={sttError}
+          loading={sttLoading}
+          {locked}
+          dangerLabel="Elimina modello"
+          onStart={() => runStt("start_stt_server")}
+          onRestart={() => runStt("restart_stt_server")}
+          onStop={() => runStt("stop_stt_server", { attemptStart: false })}
+          onDanger={handleDeleteModel}
+        />
 
         <div class="flex flex-col gap-1.5">
           <div class="flex items-center justify-between">
@@ -548,25 +436,13 @@ async function startDownload() {
             {#if recordingsDir}
               <button
                 class="p-2 cursor-pointer font-semibold text-brand-light transition hover:text-brand-cream"
-                onclick={revealRecordings}><Folder size={20} /></button
+                onclick={() => revealItemInDir(recordingsDir!)}><Folder size={20} /></button
               >
             {/if}
           </div>
 
           {#if recordingsDir}
-            <div
-              class="flex flex-col gap-1 rounded-lg border border-brand-cream/10 bg-brand-dark/50 px-2.5 py-2"
-            >
-              <span
-                class="text-[0.62rem] font-semibold tracking-wider text-brand-cream/40 uppercase"
-                >Percorso</span
-              >
-              <p
-                class="m-0 font-mono text-[0.72rem] break-all text-brand-cream/70"
-              >
-                {recordingsDir}
-              </p>
-            </div>
+            {@render pathBox("Percorso", recordingsDir)}
           {/if}
         </div>
       </div>
@@ -583,27 +459,18 @@ async function startDownload() {
           {/if}
 
           {#if settings?.llmHfRepo && settings?.llmHfFile}
-            <div class="flex flex-col gap-1 rounded-lg border border-brand-cream/10 bg-brand-dark/50 px-2.5 py-2">
-              <span class="text-[0.62rem] font-semibold tracking-wider text-brand-cream/40 uppercase">Selezionato</span>
-              <p class="m-0 font-mono text-[0.72rem] break-all text-brand-cream/70">
-                {settings.llmHfRepo} · {settings.llmHfFile}
-              </p>
-            </div>
+            {@render pathBox(
+              "Selezionato",
+              `${settings.llmHfRepo} · ${settings.llmHfFile}`,
+            )}
 
             {#if llmDownloading && llmDlProgress}
-              <div class="flex flex-col gap-1 pt-1">
-                <div class="h-1.5 overflow-hidden rounded-full bg-brand-dark">
-                  <div
-                    class="h-full rounded-full bg-brand-lighter transition-[width] duration-300"
-                    style={`width: ${llmDlProgress.pct}%`}
-                  ></div>
-                </div>
-                <span class="text-xs text-brand-cream/55">{llmDlProgress?.step === "llm" ? `Modello ${llmDlProgress.pct}%` : "Completato"}</span>
-              </div>
+              <DownloadProgressBar progress={llmDlProgress} />
             {/if}
 
-            <button
-              class="rounded-lg bg-brand-lighter px-4 py-2.5 text-[0.85rem] font-semibold text-brand-cream transition hover:bg-brand-lightest disabled:cursor-not-allowed disabled:bg-brand-light/30"
+            <Button
+              variant="solid"
+              class="px-4 py-2.5 text-[0.85rem]"
               onclick={startLlmDownload}
               disabled={llmDownloading}
             >
@@ -612,7 +479,7 @@ async function startDownload() {
                 : settings?.llmReady
                   ? `Scarica di nuovo (${formatGb(settings.llmSizeBytes)})`
                   : `Scarica modello (${formatGb(settings.llmSizeBytes)})`}
-            </button>
+            </Button>
           {/if}
 
           <input
@@ -620,12 +487,17 @@ async function startDownload() {
             class="rounded-lg border border-brand-cream/15 bg-brand-dark/50 px-2.5 py-1.5 text-[0.8rem] text-brand-cream placeholder:text-brand-cream/40 focus:outline-none"
             placeholder="Cerca un modello GGUF su Hugging Face..."
             bind:value={hfQuery}
+            onfocus={initSearch}
             oninput={scheduleSearch}
           />
 
           <div class="flex max-h-[46vh] flex-col gap-1 overflow-y-auto">
             {#if hfSearching}
               <p class="m-0 text-[0.75rem] text-brand-cream/50">Ricerca in corso...</p>
+            {:else if !hfSearched}
+              <p class="m-0 text-[0.75rem] text-brand-cream/50">
+                Clicca sul campo di ricerca per vedere i modelli più scaricati.
+              </p>
             {:else if hfResults.length === 0}
               <p class="m-0 text-[0.75rem] text-brand-cream/50">Nessun risultato.</p>
             {:else}
@@ -678,73 +550,24 @@ async function startDownload() {
           </div>
         </div>
 
-        <div class="flex flex-col gap-1.5">
-          <span class="text-[0.78rem] font-semibold text-brand-cream">Server LLM</span>
-
-          <div class="flex flex-col gap-2 rounded-lg border border-brand-cream/10 bg-brand-dark/50 px-2.5 py-2">
-            <div class="flex items-center justify-between">
-              <span class="text-[0.8rem] text-brand-cream/70">Stato:</span>
-              <span class={`text-[0.8rem] font-medium ${
-                llmStatus === "running" ? "text-green-400" : "text-brand-cream/60"
-              }`}>
-                {llmStatus === "running" ? "Attivo" : llmStatus === "loading" ? "Caricamento..." : "Fermo"}
-              </span>
-            </div>
-
-            {#if llmError}
-              <p class="m-0 text-[0.75rem] text-red-400 leading-tight">
-                {llmError}
-              </p>
-            {:else if !settings?.llmReady}
-              <p class="m-0 text-[0.75rem] text-brand-cream/50 leading-tight">
-                Scarica prima il modello.
-              </p>
-            {/if}
-          </div>
-
-          <div class="grid grid-cols-2 gap-1.5">
-            <button
-              class="rounded-lg bg-brand-lighter px-3 py-2 text-[0.8rem] font-semibold text-brand-cream transition hover:bg-brand-lightest disabled:cursor-not-allowed disabled:bg-brand-light/30"
-              onclick={handleStartLlmServer}
-              disabled={llmLoading || isRecording || isTranscribing || !settings?.llmReady}
-            >
-              {llmLoading ? "..." : "Avvia"}
-            </button>
-
-            <button
-              class="rounded-lg bg-brand-lighter px-3 py-2 text-[0.8rem] font-semibold text-brand-cream transition hover:bg-brand-lightest disabled:cursor-not-allowed disabled:bg-brand-light/30"
-              onclick={handleRestartLlmServer}
-              disabled={llmLoading || isRecording || isTranscribing || !settings?.llmReady}
-            >
-              {llmLoading ? "..." : "Riavvia"}
-            </button>
-
-            <button
-              class="rounded-lg bg-brand-lighter px-3 py-2 text-[0.8rem] font-semibold text-brand-cream transition hover:bg-brand-lightest disabled:cursor-not-allowed disabled:bg-brand-light/30"
-              onclick={handleStopLlmServer}
-              disabled={llmLoading || isRecording || isTranscribing}
-            >
-              {llmLoading ? "..." : "Spegni"}
-            </button>
-
-            <button
-              class="rounded-lg bg-red-600 px-3 py-2 text-[0.8rem] font-semibold text-brand-cream transition hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-red-600/30"
-              onclick={handleClearLlmCache}
-              disabled={llmLoading || isRecording || isTranscribing}
-            >
-              {llmLoading ? "..." : "Elimina modelli scaricati"}
-            </button>
-          </div>
-        </div>
+        <ServerControls
+          title="Server LLM"
+          status={llmStatus}
+          error={llmError}
+          hint={settings?.llmReady ? null : "Scarica prima il modello."}
+          loading={llmLoading}
+          {locked}
+          canStart={settings?.llmReady ?? false}
+          dangerLabel="Elimina modelli scaricati"
+          onStart={() => runLlm("start_llm_server")}
+          onRestart={() => runLlm("restart_llm_server")}
+          onStop={() => runLlm("stop_llm_server")}
+          onDanger={() => runLlm("clear_llm_cache")}
+        />
       </div>
       </div>
 
-      <button
-        class="rounded-lg bg-brand-cream p-2.5 text-sm font-semibold text-brand-ink transition hover:bg-brand-light"
-        onclick={save}
-      >
-        Salva
-      </button>
+      <Button variant="primary" class="p-2.5" onclick={save}>Salva</Button>
     </div>
   </div>
 {/if}

@@ -30,7 +30,6 @@ pub(crate) const LLM_PORT: u16 = 8081;
 #[serde(rename_all = "camelCase")]
 pub struct SttSettings {
     pub local_ready: bool,
-    pub configured: bool,
     pub model_dir: Option<String>,
     pub recordings_dir: Option<String>,
     // Repo/file scelti dall'utente per il modello LLM locale (riassunto/chat).

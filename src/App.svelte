@@ -11,7 +11,6 @@ import {
   formatDuration,
   formatElapsed,
   type RecordingEntry,
-  type RecordingStatus,
   type ServerStatus,
   type SttSettings,
   type SttStatus,
@@ -150,13 +149,14 @@ $effect(() => {
   return () => clearInterval(id);
 });
 
+// Timer locale, stesso pattern di transcribeMs: il frontend è l'unico a poter
+// avviare la registrazione, quindi l'inizio lo conosce già senza chiedere al
+// backend via IPC ogni mezzo secondo.
 $effect(() => {
   if (!isRecording) return;
-  const id = setInterval(async () => {
-    try {
-      const status = await invoke<RecordingStatus>("get_recording_status");
-      durationMs = status.duration_ms;
-    } catch {}
+  const start = Date.now();
+  const id = setInterval(() => {
+    durationMs = Date.now() - start;
   }, 500);
   return () => clearInterval(id);
 });
@@ -213,10 +213,6 @@ async function handleRecord() {
       error = String(e);
     }
   }
-}
-
-function handleSettingsSaved(_s: SttSettings) {
-  refreshSttState();
 }
 
 // Rilancio trascrizione da RecordsList/RecordingDetail: riusa lo stesso lock
@@ -347,7 +343,7 @@ async function retryTranscription(
   {#if showSettings}
     <SettingsPanel
       onClose={() => (showSettings = false)}
-      onSaved={handleSettingsSaved}
+      onSaved={() => refreshSttState()}
       {isRecording}
       {isTranscribing}
       {sttStatus}

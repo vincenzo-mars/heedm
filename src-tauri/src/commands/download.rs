@@ -28,6 +28,10 @@ async fn stream_to(
         .await
         .map_err(|e| e.to_string())?;
     let mut downloaded = 0u64;
+    // Emette solo al cambio di percentuale intera: per-chunk sarebbero decine
+    // di migliaia di eventi IPC su un modello da GB, per animare una barra che
+    // ha 100 stati visibili.
+    let mut last_pct = u64::MAX;
     let mut stream = resp.bytes_stream();
 
     while let Some(chunk) = stream.next().await {
@@ -35,11 +39,12 @@ async fn stream_to(
         file.write_all(&chunk).await.map_err(|e| e.to_string())?;
         downloaded += chunk.len() as u64;
         if total > 0 {
-            app.emit(
-                event,
-                serde_json::json!({"step": step, "pct": downloaded * 100 / total}),
-            )
-            .ok();
+            let pct = downloaded * 100 / total;
+            if pct != last_pct {
+                last_pct = pct;
+                app.emit(event, serde_json::json!({"step": step, "pct": pct}))
+                    .ok();
+            }
         }
     }
 

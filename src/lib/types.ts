@@ -1,13 +1,7 @@
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-export interface RecordingStatus {
-  is_recording: boolean;
-  duration_ms: number;
-}
-
 export interface SttSettings {
   localReady: boolean;
-  configured: boolean;
   modelDir: string | null;
   recordingsDir: string | null;
   llmHfRepo: string;
@@ -98,7 +92,6 @@ export interface RecordingNotes {
 export interface HfModelSummary {
   id: string;
   downloads: number;
-  likes: number;
   license: string | null;
 }
 
@@ -109,7 +102,6 @@ export interface HfGgufFile {
 
 export interface HfModelDetail {
   gated: boolean;
-  context_length: number | null;
   files: HfGgufFile[];
 }
 
@@ -131,8 +123,7 @@ export function speakerInfo(speaker: string): { label: string; color: string } {
 
 // Stato derivato di una entry, non persistito come tale: il backend scrive solo
 // `transcript`/`error` su disco (vedi `transcribe_recording`), qui si ricava la
-// terza etichetta per il badge. Da non confondere con `RecordingStatus` sopra,
-// che è lo stato della registrazione in corso (`get_recording_status`).
+// terza etichetta per il badge.
 export type TranscriptStatus = "transcribed" | "pending" | "failed";
 
 export function transcriptStatus(entry: RecordingEntry): TranscriptStatus {

@@ -1,6 +1,8 @@
 <script lang="ts">
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import Button from "./Button.svelte";
+import DownloadProgressBar from "./DownloadProgressBar.svelte";
 import type { DownloadProgress } from "./types";
 
 let { onContinue }: { onContinue: () => void } = $props();
@@ -59,38 +61,20 @@ async function startDownload() {
       Modello pronto. Potrai eliminarlo o scaricarlo di nuovo in qualsiasi
       momento dalle impostazioni.
     </p>
-    <button
-      class="cursor-pointer rounded-lg bg-brand-cream px-6 py-2.5 text-sm font-semibold text-brand-ink transition hover:bg-brand-light"
-      onclick={onContinue}
-    >
-      Continua
-    </button>
+    <Button variant="primary" onclick={onContinue}>Continua</Button>
   {:else if downloading}
     <div class="flex w-full max-w-80 flex-col gap-1.5">
       {#if dlProgress}
-        <div class="h-1.5 overflow-hidden rounded-full bg-brand-darker">
-          <div
-            class="h-full rounded-full bg-brand-lighter transition-[width] duration-300"
-            style={`width: ${dlProgress.pct}%`}
-          ></div>
-        </div>
-        <span class="text-xs text-brand-cream/55"
-          >{dlProgress.step === "model"
-            ? `Modello ${dlProgress.pct}%`
-            : "Completato"}</span
-        >
+        <DownloadProgressBar progress={dlProgress} trackClass="bg-brand-darker" />
       {/if}
     </div>
     <p class="m-0 text-xs text-brand-cream/50">
       Nel mentre puoi anche prenderti un caffè, ma non uscire dall'app!
     </p>
   {:else}
-    <button
-      class="cursor-pointer rounded-lg bg-brand-lighter px-6 py-2.5 text-sm font-semibold text-brand-cream transition hover:bg-brand-lightest"
-      onclick={startDownload}
-    >
+    <Button variant="solid" class="px-6 py-2.5 text-sm" onclick={startDownload}>
       Scarica il modello
-    </button>
+    </Button>
     {#if error}
       <p class="m-0 max-w-100 text-[0.85rem] text-red-400">{error}</p>
     {/if}

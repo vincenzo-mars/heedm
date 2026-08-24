@@ -11,7 +11,6 @@ pub trait SysAudioStop: Send {
 
 pub struct RecorderInner {
     pub is_recording: bool,
-    pub start_time: Option<std::time::Instant>,
     pub mic_samples: Arc<Mutex<Vec<f32>>>,
     pub sys_samples: Arc<Mutex<Vec<f32>>>,
     pub mic_stream: Option<cpal::Stream>,
@@ -31,7 +30,6 @@ impl RecorderInner {
     pub fn new() -> Self {
         Self {
             is_recording: false,
-            start_time: None,
             mic_samples: Arc::new(Mutex::new(Vec::new())),
             sys_samples: Arc::new(Mutex::new(Vec::new())),
             mic_stream: None,
