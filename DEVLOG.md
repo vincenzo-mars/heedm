@@ -13,6 +13,20 @@ Formato:
 
 ---
 
+## 2026-08-24 — Grigi caldi
+
+**Obiettivo:** palette meno fredda, senza cambiare i rapporti di contrasto già tarati.
+
+**Fatto:** tutti gli otto token `brand-*` in `@theme` rifatti a pari luminanza con la componente rossa sopra la blu di 3-6 punti (prima era il contrario, tinta bluastra).
+
+**Decisioni:**
+- I due token `rec` restano invariati: il rosso è già caldo
+- La tinta è ora un vincolo scritto in `reference.md`: un grigio aggiunto fuori da questa famiglia stona con il resto, e la tabella dei token è il posto dove uno se ne accorge
+
+**Prossimi passi:** `#6b7280` per lo speaker "Sconosciuto" in `types.ts` è l'unico grigio rimasto fuori palette.
+
+---
+
 ## 2026-08-24 — Routing SPA e pagine a schermo intero
 
 **Obiettivo:** lista e impostazioni a tutta finestra invece che, rispettivamente, una colonna da 680px e un modal centrato; e una navigazione vera al posto delle tre variabili in `App.svelte`.

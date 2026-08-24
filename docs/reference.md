@@ -282,18 +282,18 @@ Barra di avanzamento download modello, usata da `Onboarding` e da `SettingsPanel
 
 Tailwind CSS v4 con config CSS-first (niente `tailwind.config.js`): plugin `@tailwindcss/vite` e `@import "tailwindcss"` in `src/App.css`. Utility inline nel markup, nessun `<style>` nei componenti.
 
-Palette in `@theme`, namespace `brand-*` per non collidere con i token base di Tailwind:
+Palette in `@theme`, namespace `brand-*` per non collidere con i token base di Tailwind. I grigi sono **caldi**: stessa luminanza dei neutri puri ma con la componente rossa sopra la blu di 3-6 punti. Un token grigio aggiunto fuori da questa tinta stona con il resto.
 
 | Token | Hex | Uso |
 |---|---|---|
-| `brand-dark` | `#1b1b1d` | sfondo app |
-| `brand-darker` | `#121213` | superfici, card, pannelli |
-| `brand-light` | `#8e8e93` | grigio chiaro: testo secondario, bolla utente in chat |
-| `brand-lighter` | `#3a3a3d` | grigio medio: superficie rialzata, bottone di conferma disabilitato |
-| `brand-lightest` | `#4a4a4e` | gradino grigio più chiaro |
-| `brand-cream` | `#f5f5f7` | testo su fondo scuro, bottoni di conferma |
-| `brand-cream-dim` | `#e5e5e7` | hover dei bottoni di conferma |
-| `brand-ink` | `#0a0a0b` | testo su superfici chiare |
+| `brand-dark` | `#1e1c19` | sfondo app |
+| `brand-darker` | `#141311` | superfici, card, pannelli |
+| `brand-light` | `#94908a` | grigio chiaro: testo secondario, bolla utente in chat |
+| `brand-lighter` | `#3e3b37` | grigio medio: superficie rialzata, bottone di conferma disabilitato |
+| `brand-lightest` | `#4e4a45` | gradino grigio più chiaro |
+| `brand-cream` | `#f7f5f1` | testo su fondo scuro, bottoni di conferma |
+| `brand-cream-dim` | `#e8e4de` | hover dei bottoni di conferma |
+| `brand-ink` | `#0b0a08` | testo su superfici chiare |
 
 Il rosso non è più colore di brand: vive in due token separati, usati solo dalla registrazione (bottone REC, alone pulsante, timer).
 
