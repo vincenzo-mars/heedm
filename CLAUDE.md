@@ -43,15 +43,22 @@ src/
   lib/
     types.ts                     # tipi e helper condivisi
     utils.ts                     # cn() (clsx + tailwind-merge)
+    routes.ts                    # mappa rotte (svelte-spa-router, hash routing)
     llm.ts                       # provider AI SDK, prompt, streaming (unico file che conosce l'AI SDK)
+    stores/
+      servers.svelte.ts          # stato whisper/llama + refresh e poll /health
+      session.svelte.ts          # registrazione, trascrizione, lock e cronometri
+      recordings.svelte.ts       # cache list_recordings, fonte unica di lista e dettaglio
     Button.svelte                # bottone dell'app (varianti ghost/icon/solid/danger/primary)
+    PageHeader.svelte            # header delle pagine interne (back a icona, titolo, azioni)
+    Recorder.svelte              # rotta "/": schermata REC
     Onboarding.svelte            # primo avvio: download modello whisper a schermo intero
     SttIndicator.svelte          # indicatore stato server STT
-    SettingsPanel.svelte         # modal impostazioni/download modello/server STT+LLM
+    SettingsPanel.svelte         # rotta "/settings": impostazioni/download modello/server STT+LLM
     ServerControls.svelte        # stato + bottoni di un server locale (usato 2x da SettingsPanel)
     DownloadProgressBar.svelte   # barra download modello (Onboarding + SettingsPanel)
-    RecordsList.svelte           # lista registrazioni
-    RecordingDetail.svelte       # dettaglio singola registrazione
+    RecordsList.svelte           # rotta "/list": lista registrazioni
+    RecordingDetail.svelte       # rotta "/detail/:id": dettaglio singola registrazione
     TranscriptView.svelte        # rendering trascrizione con speaker
     TranscriptNotes.svelte       # riassunto + chat locale sulla trascrizione (orchestrazione)
     TranscriptChat.svelte        # chat locale: UI presentazionale (log, streaming, input)

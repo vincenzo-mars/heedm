@@ -13,6 +13,32 @@ Formato:
 
 ---
 
+## 2026-08-24 — Routing SPA e pagine a schermo intero
+
+**Obiettivo:** lista e impostazioni a tutta finestra invece che, rispettivamente, una colonna da 680px e un modal centrato; e una navigazione vera al posto delle tre variabili in `App.svelte`.
+
+**Fatto:**
+- `svelte-spa-router` 5.1.1 con hash routing: quattro rotte (`/`, `/list`, `/detail/:id`, `/settings`) più catch-all su `/`
+- Tre store `.svelte.ts` (`servers`, `session`, `recordings`) al posto delle props scese da `App.svelte`; `App.svelte` resta un guscio senza stato proprio
+- Schermata REC estratta in `Recorder.svelte`, header comune in `PageHeader.svelte` (back solo-icona in alto a sinistra, titolo, azioni di pagina)
+- `SettingsPanel` da modal `fixed inset-0` a rotta; il bottone Salva passa nell'header
+- `RecordingDetail` risolve l'entry dal nome cartella nell'URL invece di riceverla come prop
+
+**Decisioni:**
+- Libreria invece di uno state machine interno: la scelta era fra `svelte-spa-router` (58k download/settimana, aggiornata, peer dep su Svelte 5) e `@mateothegreat/svelte5-router` (1.4k, un manutentore). Tinro, svelte-navigator e svelte-micro sono fermi a Svelte 3/4; Routify è filesystem-based e sovradimensionato per quattro schermate
+- **Hash routing, non history**: sotto Tauri il documento è servito da un protocollo custom e non c'è nessun server che possa riscrivere i path. `#/...` è l'unica forma che regge un reload
+- L'id di rotta del dettaglio è `entry.name` (nome cartella): già univoco nella recordings dir e già filesystem-safe, nessun id sintetico da inventare
+- La store `recordings` come fonte unica elimina il riallineamento manuale di `selectedEntry` dopo un rilancio, che era un bug latente: lista e dettaglio derivano ora dallo stesso array
+- Dipendenze fra store in una sola direzione (`recordings` → `session` → `servers`), per non aprire la porta agli import circolari
+- Due eccezioni volute alla larghezza piena: testo trascrizione a `72ch` (leggibilità) e griglia impostazioni a 1600px (oltre, le due colonne si stirano)
+- Il poll di `/health` dell'LLM passa da `$effect` in un componente a `setInterval` nella store: non deve più dipendere da chi è montato
+
+**Prossimi passi:**
+- Timer di registrazione visibile anche fuori dalla rotta `/`: con le pagine intere si può entrare nelle impostazioni mentre si registra e perdere di vista tempo e stop
+- Giro a click da verificare a mano (lista → dettaglio → impostazioni → back, e reload con hash su `/detail/:id`): niente `cliclick` e UI scripting negato su questa macchina
+
+---
+
 ## 2026-08-24 — Design system dal rosso al grigio scuro
 
 **Obiettivo:** togliere il rosso come colore di brand e portare l'interfaccia su una scala di grigi scuri neutri, con i bottoni di conferma bianchi.
