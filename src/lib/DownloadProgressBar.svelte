@@ -14,7 +14,7 @@ let {
 <div class="flex flex-col gap-1 pt-1">
   <div class={`h-1.5 overflow-hidden rounded-full ${trackClass}`}>
     <div
-      class="h-full rounded-full bg-brand-lighter transition-[width] duration-300"
+      class="h-full rounded-full bg-brand-cream transition-[width] duration-300"
       style={`width: ${progress.pct}%`}
     ></div>
   </div>

@@ -268,8 +268,8 @@ async function retryTranscription(
       <button
         class={`h-30 w-30 cursor-pointer rounded-full border-none text-base font-bold text-brand-cream transition-[background,box-shadow,transform] duration-200 active:scale-[0.96] disabled:cursor-default disabled:opacity-50 ${
           isRecording
-            ? "animate-[pulse-rec_1.5s_ease-in-out_infinite] bg-brand-lightest shadow-[0_4px_16px_rgba(210,52,52,0.4)]"
-            : "bg-brand-lighter shadow-[0_4px_16px_rgba(171,43,41,0.4)] hover:bg-brand-lightest"
+            ? "animate-[pulse-rec_1.5s_ease-in-out_infinite] bg-rec-strong shadow-[0_4px_16px_rgba(210,52,52,0.4)]"
+            : "bg-rec shadow-[0_4px_16px_rgba(171,43,41,0.4)] hover:bg-rec-strong"
         }`}
         onclick={handleRecord}
         disabled={!isRecording && !canRecord}
@@ -294,7 +294,7 @@ async function retryTranscription(
         <p class="m-0 max-w-95 text-[0.85rem] text-brand-cream/50">{recordGateReason}</p>
       {/if}
       {#if isRecording}
-        <p class="m-0 font-mono text-2xl font-semibold text-brand-lightest">
+        <p class="m-0 font-mono text-2xl font-semibold text-rec-strong">
           {formatDuration(durationMs)}
         </p>
       {/if}

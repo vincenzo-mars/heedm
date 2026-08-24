@@ -50,7 +50,7 @@ function handleKeydown(e: KeyboardEvent) {
         <div
           class={`max-w-[85%] rounded-xl px-3.5 py-2 text-sm leading-relaxed whitespace-pre-wrap ${
             message.role === "user"
-              ? "self-end bg-brand-lighter text-brand-cream"
+              ? "self-end bg-brand-light text-brand-ink"
               : "self-start bg-brand-darker text-brand-cream/90"
           }`}
         >

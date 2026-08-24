@@ -2,13 +2,19 @@
 @import "@fontsource-variable/inter";
 
 @theme {
-  --color-brand-dark: #290808;
-  --color-brand-darker: #120404;
-  --color-brand-light: #c4807f;
-  --color-brand-lighter: #ab2b29;
-  --color-brand-lightest: #d23434;
-  --color-brand-cream: #fdf6f6;
-  --color-brand-ink: #020000;
+  --color-brand-dark: #1b1b1d;
+  --color-brand-darker: #121213;
+  --color-brand-light: #8e8e93;
+  --color-brand-lighter: #3a3a3d;
+  --color-brand-lightest: #4a4a4e;
+  --color-brand-cream: #f5f5f7;
+  --color-brand-cream-dim: #e5e5e7;
+  --color-brand-ink: #0a0a0b;
+
+  /* Il rosso vive solo nella registrazione (bottone REC, alone, timer): fuori
+     di lì l'interfaccia è neutra, così il colore resta un segnale di stato. */
+  --color-rec: #ab2b29;
+  --color-rec-strong: #d23434;
   --font-sans: "Inter Variable", Inter, Avenir, Helvetica, Arial, sans-serif;
 
   /* Valori letterali dei tre gradini di raggio usati nel markup, al posto
@@ -47,13 +53,13 @@
   0%,
   100% {
     box-shadow:
-      0 0 0 10px rgb(210 52 52 / 0.15),
-      0 4px 16px rgb(210 52 52 / 0.4);
+      0 0 0 10px color-mix(in srgb, var(--color-rec-strong) 15%, transparent),
+      0 4px 16px color-mix(in srgb, var(--color-rec-strong) 40%, transparent);
   }
   50% {
     box-shadow:
-      0 0 0 18px rgb(210 52 52 / 0.05),
-      0 4px 16px rgb(210 52 52 / 0.4);
+      0 0 0 18px color-mix(in srgb, var(--color-rec-strong) 5%, transparent),
+      0 4px 16px color-mix(in srgb, var(--color-rec-strong) 40%, transparent);
   }
 }
 
