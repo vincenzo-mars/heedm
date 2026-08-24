@@ -18,15 +18,15 @@ let resolving = $state(true);
 // La store può essere vuota se si arriva qui direttamente dall'URL (reload
 // con l'hash già su /detail, o HMR in dev): finché `load()` non ha risposto
 // non si può concludere che la registrazione non esista. Dopo, un id senza
-// riscontro è una registrazione cancellata e si torna alla lista con
-// `replace`, per non lasciare in history una route morta.
+// riscontro è una registrazione cancellata e si torna alla home (dove sta la
+// lista) con `replace`, per non lasciare in history una route morta.
 $effect(() => {
   const wanted = id;
   resolving = true;
   recordings.load().then(() => {
     if (wanted !== id) return;
     resolving = false;
-    if (!recordings.byName(wanted)) replace("/list");
+    if (!recordings.byName(wanted)) replace("/");
   });
 });
 
@@ -52,7 +52,7 @@ async function handleRetry() {
 <div class="flex h-full w-full flex-col">
   <PageHeader
     title={entry?.name ?? "Registrazione"}
-    onBack={() => push("/list")}
+    onBack={() => push("/")}
     actions={entry ? actions : undefined}
   />
 

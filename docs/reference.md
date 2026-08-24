@@ -105,7 +105,7 @@ Helper di presentazione nello stesso file:
 | `formatSeconds(s)` | `m:ss`, per i timestamp dei segmenti |
 | `formatElapsed(ms)` | `12.4s` sotto il minuto, poi `m:ss` |
 | `transcriptStatus(entry)` | `RecordingEntry` → `TranscriptStatus` (`transcript` presente → `"transcribed"`, altrimenti `error` presente → `"failed"`, altrimenti `"pending"`) |
-| `transcriptStatusInfo(entry)` | `transcriptStatus(entry)` → `{ label, className }` per il badge a 3 stati di `RecordsList` |
+| `transcriptStatusInfo(entry)` | `transcriptStatus(entry)` → `{ label, className }` per il badge a 3 stati di `RecordingsList` |
 
 ## Store (`src/lib/stores/`)
 
@@ -147,23 +147,26 @@ Cache di `list_recordings` (`all`, `loading`) con `load(force = false)` e `byNam
 
 | Rotta | Componente | Note |
 |---|---|---|
-| `/` | `Recorder.svelte` | schermata REC |
-| `/list` | `RecordsList.svelte` | |
+| `/` | `Recorder.svelte` | schermata REC **e** lista registrazioni |
 | `/detail/:id` | `RecordingDetail.svelte` | `id` = `entry.name`, cioè il nome della cartella: già univoco nella recordings dir e già filesystem-safe. Passa da `encodeURIComponent` in scrittura e `decodeURIComponent` in lettura |
 | `/settings` | `SettingsPanel.svelte` | |
 | `*` | `Recorder.svelte` | un hash sconosciuto non lascia la finestra vuota |
 
-Navigazione con `push` (`svelte-spa-router`), tranne due casi: le impostazioni chiudono con `pop()`, perché si aprono da qualsiasi schermata e devono tornare da dove si è arrivati; il dettaglio con un `id` inesistente usa `replace("/list")`, per non lasciare in history una rotta morta.
+Non esiste una rotta per la lista: le registrazioni stanno in home sotto il bottone REC (`RecordingsList.svelte`), così arrivarci non costa una navigazione.
 
-Nessuna route è lazy-loaded: sono quattro componenti già nel bundle, il code splitting non ripagherebbe l'attesa alla prima navigazione.
+Navigazione con `push` (`svelte-spa-router`), tranne due casi: le impostazioni chiudono con `pop()`, perché si aprono da qualsiasi schermata e devono tornare da dove si è arrivati; il dettaglio con un `id` inesistente usa `replace("/")`, per non lasciare in history una rotta morta.
+
+Nessuna route è lazy-loaded: sono tre componenti già nel bundle, il code splitting non ripagherebbe l'attesa alla prima navigazione.
 
 ### Layout delle pagine
 
 Il guscio in `App.svelte` è `flex h-screen flex-col overflow-hidden`, senza padding né centraggio: ogni rotta decide la propria larghezza e lo scroll vive dentro la rotta, così l'header di pagina può restare `sticky`.
 
-Le tre pagine interne hanno la stessa struttura: `PageHeader` in cima, poi un contenitore `flex-1 overflow-y-auto px-6 pt-5 pb-18` a tutta larghezza. Il `pb-18` lascia passare la pillola di stato e il bottone impostazioni, che sono `fixed` in basso.
+Le due pagine interne hanno la stessa struttura: `PageHeader` in cima, poi un contenitore `flex-1 overflow-y-auto px-6 pt-5 pb-18` a tutta larghezza. Il `pb-18` lascia passare la pillola di stato, `fixed` in basso a sinistra.
 
-La larghezza piena vale per lista e impostazioni. Fanno eccezione due punti, per leggibilità: il testo della trascrizione e le note stanno in una colonna `max-w-[72ch]` centrata, e la griglia delle impostazioni si ferma a `max-w-400` (1600px) — oltre, le sue due colonne si stirerebbero lasciando una voragine in mezzo.
+La home è divisa in due zone verticali: l'hero REC (`shrink-0`, non scrolla mai) e sotto la lista in `flex-1 overflow-y-auto`, che ha lo stesso `pb-18`. La lista si ferma a `max-w-200` (800px) centrata: righe più larghe allontanerebbero troppo il nome dal badge di stato.
+
+La larghezza piena vale per le impostazioni. Fanno eccezione due punti, per leggibilità: il testo della trascrizione e le note stanno in una colonna `max-w-[72ch]` centrata, e la griglia delle impostazioni si ferma a `max-w-400` (1600px) — oltre, le sue due colonne si stirerebbero lasciando una voragine in mezzo.
 
 ### `PageHeader.svelte`
 
@@ -171,7 +174,7 @@ Header comune alle rotte interne: bottone back solo-icona (`ArrowLeft`, `variant
 
 Prop: `title: string`, `onBack: () => void`, `actions?: Snippet`.
 
-Il bottone "vai alla lista" **non** sta qui: vive in `Recorder.svelte`, `fixed` in alto a destra. Nelle pagine interne si sovrapporrebbe alle azioni dell'header.
+Il bottone impostazioni **non** sta qui: vive in `Recorder.svelte`, `fixed` in alto a destra. Nelle pagine interne si sovrapporrebbe alle azioni dell'header.
 
 ## Componenti Svelte
 
@@ -179,7 +182,7 @@ Svelte 5 con le rune (`$state`, `$derived`, `$effect`, `$props`), un componente 
 
 ### `App.svelte` (root)
 
-Guscio dell'app, senza stato proprio: monta `<Router>` e `SttIndicator` (pillola di stato e bottone impostazioni, `fixed` in basso, visibili su ogni rotta).
+Guscio dell'app, senza stato proprio: monta `<Router>` e `SttIndicator` (pillola di stato, `fixed` in basso a sinistra, visibile su ogni rotta).
 
 Rendering condizionato da `servers.modelReady`, valutato allo stesso modo indipendentemente dal motivo per cui il modello manca (primo avvio mai configurato, o modello eliminato in un secondo momento dalle impostazioni): se `!modelReady` l'intera UI normale — router compreso — è sostituita da `Onboarding` a schermo intero, nessun ramo separato per i due casi.
 
@@ -188,19 +191,31 @@ Flusso:
 2. `Onboarding` scarica il modello e a fine download invoca `onContinue` → `refreshStt()` → `modelReady` torna `true` → si torna automaticamente alla UI normale
 3. REC → `session.startRecording()` → `start_recording`
 4. STOP → `session.stopRecording()` → `stop_recording` → `transcribe_recording`
-5. "o carica un file" (solo a riposo) → `session.importFile()` → se ritorna `true`, `push("/list")`
-6. Bottone lista in alto a destra → `push("/list")` → click su una entry → `push("/detail/<name>")`
-7. Rilancio trascrizione (da `RecordsList` o `RecordingDetail`) → `recordings.retryTranscription(folderPath)`
+5. "o carica un file" (solo a riposo) → `session.importFile()` → se ritorna `true`, `recordings.load(true)`
+6. Click su una riga della lista in home → `push("/detail/<name>")`
+7. Rilancio trascrizione (da `RecordingsList` o `RecordingDetail`) → `recordings.retryTranscription(folderPath)`
 
 Il riallineamento manuale dell'entry aperta dopo un rilancio non serve più: lista e dettaglio derivano entrambi da `recordings`, quindi la `load(true)` finale li aggiorna insieme.
 
 ### `Recorder.svelte`
 
-La schermata REC, estratta da `App.svelte` quando è diventata una rotta. Bottone REC/STOP, "o carica un file", cronometro, stato della trascrizione ed eventuale errore: tutto letto da `session`, nessuna prop.
+La home: hero REC in alto e `RecordingsList` sotto. Bottone REC/STOP, "o carica un file", cronometro, stato della trascrizione ed eventuale errore: tutto letto da `session`, nessuna prop. Ospita anche il bottone impostazioni (`fixed` in alto a destra).
+
+Dopo uno STOP o un import riusciti chiama `recordings.load(true)`: la lista sta nella stessa schermata e senza quel refresh la registrazione appena fatta non comparirebbe. Il refresh vive qui e non dentro `session` perché la direzione delle dipendenze fra store è `recordings → session`, non il contrario.
+
+### `RecordingsList.svelte`
+
+Lista delle registrazioni, puramente presentazionale: nessuna prop, nessun header, nessuna larghezza propria (la decide chi la monta). Fa `recordings.load()` in un `$effect` al mount. Era la rotta `/list`, prima che la lista si trasferisse in home.
+
+Ogni riga non è un unico `<button>`: è un `<div>` che contiene un `<button>` (nome, tempo di trascrizione, badge a 3 stati da `transcriptStatusInfo`, naviga a `/detail/<name>`) e un `Button` "Rilancia" separato (nesting di bottoni non è HTML valido).
+
+Due blocchi distinti, non uno solo:
+- la riga è cliccabile sempre tranne durante una registrazione (`session.isRecording`): aprire il dettaglio porterebbe via dalla home, dove vivono stop e cronometro. Durante la sola trascrizione resta cliccabile
+- "Rilancia" compare solo dove `transcriptStatus(entry) !== "transcribed"` ed è `disabled` su `session.locked` (registrazione **o** trascrizione, perché due trascrizioni insieme non si possono). Su una registrazione già trascritta il rilancio resta disponibile dal dettaglio
 
 ### `SttIndicator.svelte`
 
-Due elementi flottanti in basso, presenti su ogni rotta: il pulsante impostazioni a destra (naviga a `/settings`) e la pillola di stato a sinistra. Unica prop: `status: SttStatus`.
+Pillola di stato flottante in basso a sinistra, presente su ogni rotta. Unica prop: `status: SttStatus`.
 
 | Stato | Dot | Label |
 |---|---|---|
@@ -246,15 +261,13 @@ Il download (`download_llm_model`) ascolta l'evento dedicato `llm-download-progr
 
 Sezione "Server LLM" sotto: seconda istanza di `ServerControls` con `llmStatus`/i comandi `*_llm_server`; Avvia/Riavvia sono `disabled` anche quando `!settings.llmReady` (prop `canStart`, con il messaggio "Scarica prima il modello." come `hint` nella card di stato), e il bottone danger è "Elimina modelli scaricati" (`clear_llm_cache`, cancella sia i modelli scaricati da heedm sia la vecchia cache nativa di llama-server). La scelta di un modello dalla ricerca HF (`selectModel`) chiama anche `servers.refreshLlm({ attemptStart: false })`: il nuovo modello non è sul disco, e senza quel giro la store resterebbe con un `llmReady` stale che tiene abilitato il CTA del dettaglio trascrizione. `sttLoading`/`sttError` e `llmLoading`/`llmError` sono stati locali separati per sezione: un errore sul server LLM non disabilita i controlli whisper e viceversa. I tre box "Percorso"/"Selezionato" sono un unico snippet Svelte locale (`pathBox`).
 
-### `RecordsList.svelte`, `RecordingDetail.svelte`, `TranscriptView.svelte`
+### `RecordingDetail.svelte`, `TranscriptView.svelte`
 
-Lista delle registrazioni con badge a 3 stati ("trascritto"/"in attesa"/"fallito", da `transcriptStatusInfo`) e tempo di trascrizione; dettaglio con reveal della cartella; rendering della trascrizione raggruppata per speaker con barra colorata a sinistra.
+Dettaglio con reveal della cartella; rendering della trascrizione raggruppata per speaker con barra colorata a sinistra.
 
-Entrambe sono rotte e non ricevono props dal genitore: leggono le registrazioni da `recordings` e il lock da `session.locked`. `RecordingDetail` riceve solo `params.id` dal router.
+`RecordingDetail` è una rotta e non riceve props dal genitore oltre a `params.id`: legge le registrazioni da `recordings` e il lock da `session.locked`.
 
-In `RecordsList` ogni riga non è un unico `<button>`: è un `<div>` che contiene un `<button>` (nome + badge, disabilitato quando `session.locked`, naviga a `/detail/<name>`) e un `Button` "Rilancia" separato (nesting di bottoni non è HTML valido). Il bottone "Rilancia" compare su ogni riga, non solo su quelle fallite: il rilancio è pensato anche per un record trascritto "che non convince".
-
-In `RecordingDetail` un bottone "Rilancia trascrizione" nell'header (stesso stile di "Apri cartella") chiama `recordings.retryTranscription`: l'aggiornamento torna da solo, perché `entry` è un `$derived` su `recordings.byName(id)`. Finché `recordings.load()` non ha risposto il componente mostra "Caricamento...", non "non trovata": arrivando qui direttamente dall'URL la store è ancora vuota e l'assenza non significherebbe nulla. A `load()` conclusa, un `id` senza riscontro (registrazione cancellata) fa `replace("/list")`. Il corpo mostra `TranscriptView` se `entry.transcript` è presente, altrimenti il messaggio d'errore in rosso se `entry.error` è presente, altrimenti "Trascrizione non ancora disponibile." Sotto la card trascrizione, `TranscriptNotes` riceve `entry` e lo stato LLM letto da `servers`.
+In `RecordingDetail` un bottone "Rilancia trascrizione" nell'header (stesso stile di "Apri cartella") chiama `recordings.retryTranscription`: l'aggiornamento torna da solo, perché `entry` è un `$derived` su `recordings.byName(id)`. Finché `recordings.load()` non ha risposto il componente mostra "Caricamento...", non "non trovata": arrivando qui direttamente dall'URL la store è ancora vuota e l'assenza non significherebbe nulla. A `load()` conclusa, un `id` senza riscontro (registrazione cancellata) fa `replace("/")`. Il corpo mostra `TranscriptView` se `entry.transcript` è presente, altrimenti il messaggio d'errore in rosso se `entry.error` è presente, altrimenti "Trascrizione non ancora disponibile." Sotto la card trascrizione, `TranscriptNotes` riceve `entry` e lo stato LLM letto da `servers`.
 
 ### `TranscriptNotes.svelte`, `TranscriptChat.svelte`, `src/lib/llm.ts`
 
@@ -282,18 +295,18 @@ Barra di avanzamento download modello, usata da `Onboarding` e da `SettingsPanel
 
 Tailwind CSS v4 con config CSS-first (niente `tailwind.config.js`): plugin `@tailwindcss/vite` e `@import "tailwindcss"` in `src/App.css`. Utility inline nel markup, nessun `<style>` nei componenti.
 
-Palette in `@theme`, namespace `brand-*` per non collidere con i token base di Tailwind:
+Palette in `@theme`, namespace `brand-*` per non collidere con i token base di Tailwind. I grigi sono **caldi**: stessa luminanza dei neutri puri ma con la componente rossa sopra la blu di 3-6 punti. Un token grigio aggiunto fuori da questa tinta stona con il resto.
 
 | Token | Hex | Uso |
 |---|---|---|
-| `brand-dark` | `#1b1b1d` | sfondo app |
-| `brand-darker` | `#121213` | superfici, card, pannelli |
-| `brand-light` | `#8e8e93` | grigio chiaro: testo secondario, bolla utente in chat |
-| `brand-lighter` | `#3a3a3d` | grigio medio: superficie rialzata, bottone di conferma disabilitato |
-| `brand-lightest` | `#4a4a4e` | gradino grigio più chiaro |
-| `brand-cream` | `#f5f5f7` | testo su fondo scuro, bottoni di conferma |
-| `brand-cream-dim` | `#e5e5e7` | hover dei bottoni di conferma |
-| `brand-ink` | `#0a0a0b` | testo su superfici chiare |
+| `brand-dark` | `#1e1c19` | sfondo app |
+| `brand-darker` | `#141311` | superfici, card, pannelli |
+| `brand-light` | `#94908a` | grigio chiaro: testo secondario, bolla utente in chat |
+| `brand-lighter` | `#3e3b37` | grigio medio: superficie rialzata, bottone di conferma disabilitato |
+| `brand-lightest` | `#4e4a45` | gradino grigio più chiaro |
+| `brand-cream` | `#f7f5f1` | testo su fondo scuro, bottoni di conferma |
+| `brand-cream-dim` | `#e8e4de` | hover dei bottoni di conferma |
+| `brand-ink` | `#0b0a08` | testo su superfici chiare |
 
 Il rosso non è più colore di brand: vive in due token separati, usati solo dalla registrazione (bottone REC, alone pulsante, timer).
 

@@ -1,12 +1,12 @@
 <script lang="ts">
 import { push } from "svelte-spa-router";
 import Button from "./Button.svelte";
-import PageHeader from "./PageHeader.svelte";
 import { recordings } from "./stores/recordings.svelte";
 import { session } from "./stores/session.svelte";
 import {
   formatElapsed,
   type RecordingEntry,
+  transcriptStatus,
   transcriptStatusInfo,
 } from "./types";
 
@@ -14,20 +14,23 @@ $effect(() => {
   recordings.load();
 });
 
+// Solo la registrazione blocca l'apertura del dettaglio: navigare via dalla
+// home mentre si registra nasconderebbe stop e cronometro, che vivono lì.
+// Durante la sola trascrizione aprire una registrazione vecchia non
+// interferisce, quindi le righe restano cliccabili.
+const rowsLocked = $derived(session.isRecording);
+
 async function handleRetry(entry: RecordingEntry) {
   if (session.locked) return;
   await recordings.retryTranscription(entry.folder_path);
 }
 </script>
 
-<div class="flex h-full w-full flex-col">
-  <PageHeader title="Registrazioni" onBack={() => push("/")} />
-
-  <div class="flex flex-1 flex-col gap-3 overflow-y-auto px-6 pt-5 pb-18">
+<div class="flex flex-col gap-3">
   {#if recordings.loading && recordings.all.length === 0}
-    <p class="text-sm text-brand-cream/50">Caricamento...</p>
+    <p class="m-0 text-sm text-brand-cream/50">Caricamento...</p>
   {:else if recordings.all.length === 0}
-    <p class="text-sm text-brand-cream/50">Nessuna registrazione trovata.</p>
+    <p class="m-0 text-sm text-brand-cream/40">Nessuna registrazione, per ora.</p>
   {:else}
     {#each recordings.all as entry (entry.folder_path)}
       {@const status = transcriptStatusInfo(entry)}
@@ -37,7 +40,8 @@ async function handleRetry(entry: RecordingEntry) {
         <button
           class="flex flex-1 cursor-pointer items-center justify-between gap-3 border-none bg-transparent p-0 text-left disabled:cursor-default"
           onclick={() => push(`/detail/${encodeURIComponent(entry.name)}`)}
-          disabled={session.locked}
+          disabled={rowsLocked}
+          title={rowsLocked ? "Attendi la fine della registrazione in corso" : undefined}
         >
           <span class="text-sm font-semibold text-brand-cream">{entry.name}</span>
           <span class="flex items-center gap-2">
@@ -53,15 +57,18 @@ async function handleRetry(entry: RecordingEntry) {
             </span>
           </span>
         </button>
-        <Button
-          onclick={() => handleRetry(entry)}
-          disabled={session.locked}
-          title={session.locked ? "Attendi la fine della registrazione o della trascrizione in corso" : undefined}
-        >
-          Rilancia
-        </Button>
+        <!-- Il rilancio compare solo dove serve davvero: su una registrazione
+             già trascritta resta comunque disponibile dal dettaglio. -->
+        {#if transcriptStatus(entry) !== "transcribed"}
+          <Button
+            onclick={() => handleRetry(entry)}
+            disabled={session.locked}
+            title={session.locked ? "Attendi la fine della registrazione o della trascrizione in corso" : undefined}
+          >
+            Rilancia
+          </Button>
+        {/if}
       </div>
     {/each}
   {/if}
-  </div>
 </div>

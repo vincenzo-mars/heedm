@@ -1,7 +1,4 @@
 <script lang="ts">
-import { Settings } from "@lucide/svelte";
-import { push } from "svelte-spa-router";
-import Button from "./Button.svelte";
 import type { SttStatus } from "./types";
 
 let { status }: { status: SttStatus } = $props();
@@ -43,12 +40,6 @@ const STATUS: Record<SttStatus, { label: string; text: string; dot: string }> =
     },
   };
 </script>
-
-<div class="fixed right-4 bottom-4 z-10 flex items-center gap-2.5">
-  <Button variant="icon" onclick={() => push("/settings")} title="Impostazioni">
-    <Settings size={16} />
-  </Button>
-</div>
 
 <div
   class="fixed left-4 bottom-4 py-2 px-3 z-10 flex items-center rounded-full bg-brand-darker/85 shadow-[0_2px_12px_rgba(0,0,0,0.3)]"

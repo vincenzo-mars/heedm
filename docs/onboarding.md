@@ -59,7 +59,7 @@ i file, puoi passare alla successiva.
 | `src/App.svelte` | Unico owner dello stato globale: `refreshSttState`/`refreshLlmState`, `canRecord`, `retryTranscription`. Nessuno store, tutto props e callback |
 | `src/lib/Onboarding.svelte` | Il gate a schermo intero quando manca il modello: nessun bottone "salta" |
 | `src/lib/SettingsPanel.svelte` | Il file più lungo del repo, ma è ripetitivo: leggi la sezione Server STT e le altre si deducono |
-| `RecordsList` / `RecordingDetail` / `TranscriptView` | Presentazionali, 200 righe in tutto: leggili di corsa |
+| `RecordingsList` / `RecordingDetail` / `TranscriptView` | Presentazionali, 200 righe in tutto: leggili di corsa |
 
 > Domanda: perché `refreshLlmState` ha `attemptStart` a `false` e
 > `refreshSttState` a `true`?
