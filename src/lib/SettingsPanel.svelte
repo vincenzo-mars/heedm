@@ -222,6 +222,10 @@ async function selectModel(repo: string, file: HfGgufFile) {
     llmSizeBytes: file.size_bytes,
     llmReady: false,
   };
+  // Il nuovo modello non è ancora sul disco: App deve saperlo, altrimenti il
+  // CTA "Avvia il server LLM" del dettaglio resta abilitato su un modello
+  // mancante.
+  await onLlmServerRefresh({ attemptStart: false });
 }
 
 async function startLlmDownload() {

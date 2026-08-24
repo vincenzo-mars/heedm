@@ -12,6 +12,7 @@ let {
   isTranscribing,
   onRetry,
   llmStatus,
+  llmReady,
   onLlmRefresh,
 }: {
   entry: RecordingEntry;
@@ -20,6 +21,7 @@ let {
   isTranscribing: boolean;
   onRetry: (folderPath: string) => Promise<RecordingEntry[]>;
   llmStatus: ServerStatus;
+  llmReady: boolean;
   onLlmRefresh: (opts?: {
     attemptStart?: boolean;
   }) => Promise<SttSettings | null>;
@@ -70,5 +72,5 @@ async function handleRetry() {
     {/if}
   </div>
 
-  <TranscriptNotes {entry} {llmStatus} {onLlmRefresh} />
+  <TranscriptNotes {entry} {llmStatus} {llmReady} {onLlmRefresh} />
 </div>
