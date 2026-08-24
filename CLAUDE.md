@@ -51,13 +51,13 @@ src/
       recordings.svelte.ts       # cache list_recordings, fonte unica di lista e dettaglio
     Button.svelte                # bottone dell'app (varianti ghost/icon/solid/danger/primary)
     PageHeader.svelte            # header delle pagine interne (back a icona, titolo, azioni)
-    Recorder.svelte              # rotta "/": schermata REC
+    Recorder.svelte              # rotta "/": schermata REC + lista registrazioni
     Onboarding.svelte            # primo avvio: download modello whisper a schermo intero
     SttIndicator.svelte          # indicatore stato server STT
     SettingsPanel.svelte         # rotta "/settings": impostazioni/download modello/server STT+LLM
     ServerControls.svelte        # stato + bottoni di un server locale (usato 2x da SettingsPanel)
     DownloadProgressBar.svelte   # barra download modello (Onboarding + SettingsPanel)
-    RecordsList.svelte           # rotta "/list": lista registrazioni
+    RecordingsList.svelte        # lista registrazioni, montata in home sotto il REC
     RecordingDetail.svelte       # rotta "/detail/:id": dettaglio singola registrazione
     TranscriptView.svelte        # rendering trascrizione con speaker
     TranscriptNotes.svelte       # riassunto + chat locale sulla trascrizione (orchestrazione)

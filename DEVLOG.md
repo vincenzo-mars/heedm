@@ -13,6 +13,29 @@ Formato:
 
 ---
 
+## 2026-08-24 — Lista registrazioni in home
+
+**Obiettivo:** vedere le registrazioni precedenti appena sotto il bottone REC, senza passare da un'altra pagina.
+
+**Fatto:**
+- Rotta `/list` eliminata: `RecordsList.svelte` diventa `RecordingsList.svelte`, lista presentazionale senza header né larghezza propria, montata dentro `Recorder.svelte`
+- Home divisa in due zone: hero REC `shrink-0` in alto (bottone invariato a 120px) e lista `flex-1 overflow-y-auto` sotto, capped a `max-w-200`
+- Bottone impostazioni spostato da `SttIndicator` (basso a destra) a `Recorder` (alto a destra), dove stava il bottone lista che è sparito; `SttIndicator` resta la sola pillola di stato
+- `RecordingDetail`: back e `replace` dell'id inesistente puntano a `/` invece che a `/list`
+
+**Decisioni:**
+- Un solo posto per la lista, non due: con l'elenco in home, una `/list` a schermo intero sarebbe stata una seconda copia da tenere allineata
+- **Il bottone impostazioni non può stare nel guscio**: `fixed` in alto a destra collide con le azioni di `PageHeader` nelle pagine interne. Stessa lezione già imparata dal bottone lista, ora scritta in `reference.md`
+- Righe bloccate solo durante la registrazione, non durante la trascrizione: navigare via dalla home mentre si registra nasconde stop e cronometro, mentre aprire una registrazione vecchia durante una trascrizione non interferisce. Il "Rilancia" invece resta legato a `session.locked` (due trascrizioni insieme non si possono): dentro la stessa riga il click passa e il rilancio no, ed è voluto
+- "Rilancia" solo sulle righe non trascritte: su una schermata che è anche la home, un bottone per riga era rumore. Sul già trascritto resta il bottone del dettaglio
+- Il refresh della lista dopo STOP/import sta in `Recorder.svelte` e non in `session`: la direzione delle dipendenze fra store è `recordings → session`
+
+**Prossimi passi:**
+- Giro a click da verificare a mano: REC → la nuova riga compare in lista senza refresh, click su una riga durante una trascrizione, rilancio di una fallita
+- Restano in coda le due voci dell'entry sul routing (cartelle per i componenti, disposizione impostazioni)
+
+---
+
 ## 2026-08-24 — Grigi caldi
 
 **Obiettivo:** palette meno fredda, senza cambiare i rapporti di contrasto già tarati.
